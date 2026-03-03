@@ -118,10 +118,10 @@ http://127.0.0.1:9090/ui
 > 不建议直接将管理端口暴露到公网。
 
 如果想要**公网访问**
-编辑 `.env` 文件，设置公网访问并修改对外端口：
+编辑 `.env` 文件，设置公网访问（对外端口不用改，改了机器人也能扫到，密钥设置的长点就行）：
 
 ```
-sudo bash -c 'echo "EXTERNAL_CONTROLLER=0.0.0.0:9099" > /opt/clash-for-linux/.env'
+sudo bash -c 'echo "EXTERNAL_CONTROLLER=0.0.0.0:9090" > /opt/clash-for-linux/.env'
 ```
 
 配置完成后，**重启服务使配置生效**：
