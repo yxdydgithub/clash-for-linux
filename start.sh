@@ -88,6 +88,7 @@ URL="${CLASH_URL:-}"
 
 # 清理可能的 CRLF（Windows 写 .env 很常见）
 URL="$(printf '%s' "$URL" | tr -d '\r')"
+URL="$(printf '%s' "$URL" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
 
 #让 bash 子进程能拿到
 export CLASH_URL="$URL"
@@ -95,6 +96,10 @@ export CLASH_URL="$URL"
 # 只有在“需要在线更新订阅”的模式下才强制要求 URL
 if [ -z "$URL" ] && [ "${SYSTEMD_MODE:-false}" != "true" ]; then
   echo "[ERR] CLASH_URL 为空（未配置订阅地址）"
+  exit 2
+fi
+if [ -n "$URL" ] && ! printf '%s' "$URL" | grep -Eq '^https?://'; then
+  echo "[ERR] CLASH_URL 格式无效：必须以 http:// 或 https:// 开头" >&2
   exit 2
 fi
 
