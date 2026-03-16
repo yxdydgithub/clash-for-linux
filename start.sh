@@ -660,7 +660,7 @@ fi
 # 判断订阅是否已是完整 Clash YAML（Meta / Mihomo / Premium）
 # 若是完整配置，则直接使用，跳过后续代理拆解与拼接
 # =========================================================
-if grep -qE '^(proxies:|proxy-providers:|mixed-port:|port:)' "$Temp_Dir/clash.yaml"; then
+if [ -s "$Temp_Dir/clash.yaml" ] && grep -qE '^(proxies:|proxy-providers:|mixed-port:|port:)' "$Temp_Dir/clash.yaml"; then
   echo "[INFO] subscription is a full Clash config, use it directly"
   cp -f "$Temp_Dir/clash.yaml" "$Conf_Dir/config.yaml"
 
@@ -681,8 +681,8 @@ if grep -qE '^(proxies:|proxy-providers:|mixed-port:|port:)' "$Temp_Dir/clash.ya
     ln -sfn "$Dashboard_Src" "$Conf_Dir/ui" 2>/dev/null || true
   fi
 
-    SKIP_CONFIG_REBUILD=true
-  fi
+  SKIP_CONFIG_REBUILD=true
+fi
 
 #################### 订阅转换/拼接（非兜底路径） ####################
 if [ "$SKIP_CONFIG_REBUILD" != "true" ]; then
