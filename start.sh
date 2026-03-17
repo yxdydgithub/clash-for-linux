@@ -345,32 +345,6 @@ if_success() {
   fi
 }
 
-normalize_config_from_env() {
-  local f="$1"
-  [ -f "$f" ] || return 0
-
-  # 端口：你当前诉求是 mixed-port 统一
-  if [ -n "${CLASH_HTTP_PORT:-}" ]; then
-    upsert_yaml_kv "$f" "mixed-port" "${CLASH_HTTP_PORT}" || true
-  fi
-
-  # 可选：如果你也支持 socks/redir，就一起
-  if [ -n "${CLASH_SOCKS_PORT:-}" ]; then
-    upsert_yaml_kv "$f" "socks-port" "${CLASH_SOCKS_PORT}" || true
-  fi
-  if [ -n "${CLASH_REDIR_PORT:-}" ]; then
-    upsert_yaml_kv "$f" "redir-port" "${CLASH_REDIR_PORT}" || true
-  fi
-
-  # 可选：allow-lan / bind-address
-  if [ -n "${CLASH_ALLOW_LAN:-}" ]; then
-    upsert_yaml_kv "$f" "allow-lan" "${CLASH_ALLOW_LAN}" || true
-  fi
-  if [ -n "${CLASH_LISTEN_IP:-}" ]; then
-    upsert_yaml_kv "$f" "bind-address" "${CLASH_LISTEN_IP}" || true
-  fi
-}
-
 ensure_subconverter() {
   local bin="${Server_Dir}/tools/subconverter/subconverter"
   local port="25500"
@@ -716,10 +690,6 @@ if [ -s "$Temp_Dir/clash.yaml" ] && grep -qE '^(proxies:|proxy-providers:|mixed-
   # 同时把 conf/config.yaml 也补齐（方便你 grep/排查）
   force_write_controller_and_ui "$Conf_Dir/config.yaml" || true
   force_write_secret "$Conf_Dir/config.yaml" || true
-
-  # 用 .env 覆盖订阅里的端口
-  normalize_config_from_env "$Temp_Dir/config.yaml"
-  normalize_config_from_env "$Conf_Dir/config.yaml"
 
   # 创建 UI 软链（systemd non-root 用 /tmp）
   Dashboard_Src="$Server_Dir/dashboard/public"
