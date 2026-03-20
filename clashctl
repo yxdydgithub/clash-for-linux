@@ -62,7 +62,17 @@ has_systemd() {
 }
 
 service_exists() {
-  has_systemd && systemctl list-unit-files 2>/dev/null | grep -q "^${Service_Name}"
+  has_systemd || return 1
+
+  local load_state
+  load_state="$(systemctl show "$Service_Name" --property=LoadState --value 2>/dev/null || true)"
+
+  [ -n "$load_state" ] && [ "$load_state" != "not-found" ]
+}
+
+service_is_active() {
+  service_exists || return 1
+  systemctl is-active --quiet "$Service_Name"
 }
 
 read_config_value() {
@@ -95,12 +105,39 @@ cmd_off() {
 }
 
 cmd_status() {
+  local proc_info=""
+  proc_info="$(ps -eo pid,ppid,cmd | grep -E '[c]lash-linux|[m]ihomo' || true)"
+
+  echo "=== Clash Status ==="
+
   if service_exists; then
-    systemctl --no-pager --full status "$Service_Name" || true
-  else
-    warn "未检测到 systemd 服务，尝试检查进程"
-    ps -ef | grep -E 'clash|mihomo' | grep -v grep || true
+    local active_state enabled_state
+    active_state="$(systemctl is-active "$Service_Name" 2>/dev/null || true)"
+    enabled_state="$(systemctl is-enabled "$Service_Name" 2>/dev/null || true)"
+
+    echo "Service: installed"
+    echo "Active : ${active_state:-unknown}"
+    echo "Enabled: ${enabled_state:-unknown}"
+
+    if [ -n "$proc_info" ]; then
+      echo
+      echo "Process:"
+      echo "$proc_info"
+    fi
+
+    return 0
   fi
+
+  if [ -n "$proc_info" ]; then
+    warn "未检测到 systemd 服务，但发现 Clash 进程正在运行"
+    echo
+    echo "Process:"
+    echo "$proc_info"
+    return 0
+  fi
+
+  warn "未检测到 systemd 服务，也未发现 Clash 进程"
+  return 1
 }
 
 cmd_proxy() {
