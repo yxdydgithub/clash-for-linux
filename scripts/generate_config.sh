@@ -118,57 +118,69 @@ is_full_config() {
 }
 
 main() {
-  if [ "$CLASH_AUTO_UPDATE" != "true" ]; then
-    if [ -s "$RUNTIME_CONFIG" ]; then
-      write_state "success" "auto_update_disabled_keep_runtime" "runtime_existing"
-      exit 0
+    if [ "$CLASH_AUTO_UPDATE" != "true" ]; then
+        if [ -s "$RUNTIME_CONFIG" ]; then
+        write_state "success" "auto_update_disabled_keep_runtime" "runtime_existing"
+        exit 0
+        fi
+        use_fallback
+        write_state "success" "auto_update_disabled_use_fallback" "fallback"
+        exit 0
     fi
-    use_fallback
-    write_state "success" "auto_update_disabled_use_fallback" "fallback"
-    exit 0
-  fi
 
-  if ! download_subscription; then
-    if [ -s "$RUNTIME_CONFIG" ]; then
-      write_state "success" "download_failed_keep_last_good" "runtime_existing"
-      exit 0
+    if ! download_subscription; then
+        if [ -s "$RUNTIME_CONFIG" ]; then
+        write_state "success" "download_failed_keep_last_good" "runtime_existing"
+        exit 0
+        fi
+        use_fallback
+        write_state "success" "download_failed_use_fallback" "fallback"
+        exit 0
     fi
-    use_fallback
-    write_state "success" "download_failed_use_fallback" "fallback"
-    exit 0
-  fi
 
-  cp -f "$TEMP_DOWNLOAD" "$TEMP_CONVERTED"
+    cp -f "$TEMP_DOWNLOAD" "$TEMP_CONVERTED"
 
-  if is_full_config "$TEMP_CONVERTED"; then
-    cp -f "$TEMP_CONVERTED" "$RUNTIME_CONFIG"
-    force_write_controller_and_ui "$RUNTIME_CONFIG"
-    force_write_secret "$RUNTIME_CONFIG"
-    write_state "success" "subscription_full" "subscription_full"
-    exit 0
-  fi
+    if is_full_config "$TEMP_CONVERTED"; then
+        cp -f "$TEMP_CONVERTED" "$RUNTIME_CONFIG"
+        force_write_controller_and_ui "$RUNTIME_CONFIG"
+        force_write_secret "$RUNTIME_CONFIG"
+        write_state "success" "subscription_full" "subscription_full"
+        exit 0
+    fi
 
-  # 片段订阅：这里先保留模板拼接逻辑
-  if [ ! -s "$CONF_DIR/template_config.yaml" ]; then
-    echo "[ERROR] missing template_config.yaml" >&2
+    # 片段订阅：这里先保留模板拼接逻辑
+    TEMPLATE_FILE=""
+
+    if [ -s "$CONF_DIR/template_config.yaml" ]; then
+    TEMPLATE_FILE="$CONF_DIR/template_config.yaml"
+    elif [ -s "$TEMP_DIR/templete_config.yaml" ]; then
+    TEMPLATE_FILE="$TEMP_DIR/templete_config.yaml"
+    elif [ -s "$CONF_DIR/templete_config.yaml" ]; then
+    TEMPLATE_FILE="$CONF_DIR/templete_config.yaml"
+    elif [ -s "$PROJECT_DIR/temp/templete_config.yaml" ]; then
+    TEMPLATE_FILE="$PROJECT_DIR/temp/templete_config.yaml"
+    fi
+
+    if [ -z "$TEMPLATE_FILE" ]; then
+    echo "[ERROR] missing template config file (template_config.yaml / templete_config.yaml)" >&2
     write_state "failed" "missing_template" "none"
     exit 1
-  fi
+    fi
 
-  sed -n '/^proxies:/,$p' "$TEMP_CONVERTED" > "$TEMP_DIR/proxy.txt"
-  cat "$CONF_DIR/template_config.yaml" > "$RUNTIME_CONFIG"
-  cat "$TEMP_DIR/proxy.txt" >> "$RUNTIME_CONFIG"
+    sed -n '/^proxies:/,$p' "$TEMP_CONVERTED" > "$TEMP_DIR/proxy.txt"
+    cat "$TEMPLATE_FILE" > "$RUNTIME_CONFIG"
+    cat "$TEMP_DIR/proxy.txt" >> "$RUNTIME_CONFIG"
 
-  sed -i "s/CLASH_HTTP_PORT_PLACEHOLDER/${CLASH_HTTP_PORT}/g" "$RUNTIME_CONFIG"
-  sed -i "s/CLASH_SOCKS_PORT_PLACEHOLDER/${CLASH_SOCKS_PORT}/g" "$RUNTIME_CONFIG"
-  sed -i "s/CLASH_REDIR_PORT_PLACEHOLDER/${CLASH_REDIR_PORT}/g" "$RUNTIME_CONFIG"
-  sed -i "s/CLASH_LISTEN_IP_PLACEHOLDER/${CLASH_LISTEN_IP}/g" "$RUNTIME_CONFIG"
-  sed -i "s/CLASH_ALLOW_LAN_PLACEHOLDER/${CLASH_ALLOW_LAN}/g" "$RUNTIME_CONFIG"
+    sed -i "s/CLASH_HTTP_PORT_PLACEHOLDER/${CLASH_HTTP_PORT}/g" "$RUNTIME_CONFIG"
+    sed -i "s/CLASH_SOCKS_PORT_PLACEHOLDER/${CLASH_SOCKS_PORT}/g" "$RUNTIME_CONFIG"
+    sed -i "s/CLASH_REDIR_PORT_PLACEHOLDER/${CLASH_REDIR_PORT}/g" "$RUNTIME_CONFIG"
+    sed -i "s/CLASH_LISTEN_IP_PLACEHOLDER/${CLASH_LISTEN_IP}/g" "$RUNTIME_CONFIG"
+    sed -i "s/CLASH_ALLOW_LAN_PLACEHOLDER/${CLASH_ALLOW_LAN}/g" "$RUNTIME_CONFIG"
 
-  force_write_controller_and_ui "$RUNTIME_CONFIG"
-  force_write_secret "$RUNTIME_CONFIG"
+    force_write_controller_and_ui "$RUNTIME_CONFIG"
+    force_write_secret "$RUNTIME_CONFIG"
 
-  write_state "success" "subscription_fragment_merged" "subscription_fragment"
+    write_state "success" "subscription_fragment_merged" "subscription_fragment"
 }
 
 main "$@"
