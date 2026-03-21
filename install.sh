@@ -2,7 +2,7 @@
 set -euo pipefail
 
 Server_Dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-Install_Dir="${CLASH_INSTALL_DIR:-/opt/clash-for-linux}"
+Install_Dir="${CLASH_INSTALL_DIR:-$Server_Dir}"
 
 Service_Name="clash-for-linux"
 Service_User="root"
@@ -25,15 +25,6 @@ fi
 # 同步文件
 # =========================
 mkdir -p "$Install_Dir"
-
-if [ "$Server_Dir" != "$Install_Dir" ]; then
-  echo "[INFO] sync project to ${Install_Dir}"
-  if command -v rsync >/dev/null 2>&1; then
-    rsync -a --delete --exclude '.git' "$Server_Dir/" "$Install_Dir/"
-  else
-    cp -a "$Server_Dir/." "$Install_Dir/"
-  fi
-fi
 
 chmod +x "$Install_Dir"/clashctl 2>/dev/null || true
 chmod +x "$Install_Dir"/scripts/* 2>/dev/null || true
