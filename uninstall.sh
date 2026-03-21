@@ -3,7 +3,7 @@ set -euo pipefail
 
 SERVICE_NAME="clash-for-linux"
 UNIT_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
-INSTALL_DIR="${CLASH_INSTALL_DIR:-/opt/clash-for-linux}"
+INSTALL_DIR="${CLASH_INSTALL_DIR:-$(cd "$(dirname "$0")" && pwd)}"
 
 CLASHCTL_LINK="/usr/local/bin/clashctl"
 PROFILED_FILE="/etc/profile.d/clash-for-linux.sh"
