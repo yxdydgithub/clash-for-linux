@@ -226,7 +226,10 @@ cmd_mode() {
 }
 
 cmd_generate() {
-  bash "$PROJECT_DIR/scripts/generate_config.sh"
+  if ! bash "$PROJECT_DIR/scripts/generate_config.sh"; then
+    err "配置生成失败"
+    return 1
+  fi
   ok "Config generated"
 }
 
@@ -352,9 +355,9 @@ cmd_update() {
   if ! bash "$PROJECT_DIR/scripts/generate_config.sh"; then
     err "配置生成失败"
     exit 1
-  fi
+  fi 
 
-  echo "[INFO] restarting service ..."
+  echo "[INFO] starting service ..."
   if has_systemd; then
     if ! systemctl start clash-for-linux.service; then
       err "systemd 启动失败"
@@ -362,16 +365,11 @@ cmd_update() {
     fi
 
     echo "[INFO] waiting for service to be active ..."
-    local i state
-    for i in 1 2 3 4 5 6 7 8 9 10; do
-      state="$(systemctl is-active clash-for-linux.service 2>/dev/null || true)"
-      if [ "$state" = "active" ]; then
-        ok "更新完成"
-        cmd_status
-        return 0
-      fi
-      sleep 1
-    done
+    if wait_for_systemd_active; then
+      ok "更新完成"
+      cmd_status
+      return 0
+    fi
 
     err "服务启动未就绪"
     systemctl status clash-for-linux.service -l --no-pager || true
@@ -511,10 +509,48 @@ get_actual_ports() {
 
   export ACTUAL_HTTP_PORT ACTUAL_CTRL_PORT
 }
+
+wait_for_systemd_active() {
+  local i state
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    state="$(systemctl is-active "$SERVICE_NAME" 2>/dev/null || true)"
+    if [ "$state" = "active" ]; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
 cmd_restart() {
-  cmd_generate
+  echo "[INFO] stopping Clash ..."
   cmd_stop "${1:-false}" || true
-  cmd_start
+  sleep 1
+
+  echo "[INFO] regenerating config ..."
+  if ! cmd_generate; then
+    return 1
+  fi
+
+  echo "[INFO] starting Clash ..."
+  if ! cmd_start; then
+    err "启动失败"
+    return 1
+  fi
+
+  if has_systemd; then
+    echo "[INFO] waiting for service to be active ..."
+    if wait_for_systemd_active; then
+      ok "重启完成"
+      return 0
+    fi
+
+    err "服务启动未就绪"
+    systemctl status "$SERVICE_NAME" -l --no-pager || true
+    return 1
+  fi
+
+  ok "重启完成"
 }
 
 cmd_ui() {
