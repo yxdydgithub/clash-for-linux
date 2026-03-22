@@ -80,12 +80,9 @@ usage() {
   secret                 输出当前 secret
   doctor                 健康检查
   logs [-f] [-n 100]     查看日志
-  sub show|update        查看订阅地址 / 更新订阅并应用配置
+  sub show|update        查看订阅地址 / 输入或更新订阅并立即生效
   tun status|on|off      查看/启用/关闭 Tun
   mixin status|on|off    查看/启用/关闭 Mixin
-
-高级命令:
-  generate               生成配置（调试用，不会启动服务）
 
 选项:
   --from-systemd         内部使用，避免 stop 递归调用 systemctl
@@ -877,7 +874,7 @@ cmd_sub() {
       current_url="$(read_env_value "CLASH_URL" || true)"
 
       if is_valid_subscription_url "$current_url"; then
-        echo "[1] $current_url"
+        echo "$current_url"
       else
         echo "未配置订阅"
       fi
