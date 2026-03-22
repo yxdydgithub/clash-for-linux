@@ -147,40 +147,47 @@ EOF
 }
 
 show_dashboard_info() {
-  local secret="$1"
-  local public_ip="$2"
+  local config_file="$Install_Dir/runtime/config.yaml"
 
-  local controller_addr="${EXTERNAL_CONTROLLER:-127.0.0.1:9090}"
-  local host="${controller_addr%:*}"
-  local port="${controller_addr##*:}"
-
+  local controller_addr=""
+  local secret=""
+  local host=""
+  local port=""
   local lan_ip=""
-  lan_ip="$(get_lan_ip)"
-
-  local local_ui="http://127.0.0.1:${port}/ui"
+  local public_ip=""
+  local local_ui=""
   local lan_ui=""
   local public_ui=""
-  local custom_ui="${CLASH_DASHBOARD_PUBLIC_URL:-}"
 
+  [ -f "$config_file" ] || return 0
+
+  # 从最终配置读取（关键）
+  controller_addr="$(sed -n 's/^external-controller:[[:space:]]*//p' "$config_file" | head -n1 | tr -d '"' | tr -d "'")"
+  secret="$(sed -n 's/^secret:[[:space:]]*//p' "$config_file" | head -n1 | tr -d '"' | tr -d "'")"
+
+  [ -n "$controller_addr" ] || controller_addr="127.0.0.1:9090"
+
+  host="${controller_addr%:*}"
+  port="${controller_addr##*:}"
+
+  lan_ip="$(get_lan_ip)"
+  public_ip="$(get_public_ip)"
+
+  local_ui="http://127.0.0.1:${port}/ui"
   [ -n "$lan_ip" ] && lan_ui="http://${lan_ip}:${port}/ui"
-  [ -n "$public_ip" ] && public_ui="http://${public_ip}:${port}/ui"
 
-  local inner_width=45
-
-  box_line() {
-    local text="$1"
-    local max_len=$((inner_width - 2))
-    text="${text:0:$max_len}"
-    printf "║ %-*s ║\n" "$max_len" "$text"
-  }
+  # ✅ 只有对外监听才显示公网
+  if [ "$host" = "0.0.0.0" ] || [ "$host" = "::" ]; then
+    [ -n "$public_ip" ] && public_ui="http://${public_ip}:${port}/ui"
+  fi
 
   ui_blank
   ui_summary_begin "😼 Clash Web 控制台"
   ui_summary_row "🔓 注意放行端口" "$port"
-  ui_summary_row "💻 内网" "$lan_ui"
-  ui_summary_row "🌐 公共" "$custom_ui"
-  ui_summary_row "🌏 公网" "$public_ui"
-  ui_summary_row "🔑 密钥" "$secret"
+  [ -n "$lan_ui" ] && ui_summary_row "💻 内网" "$lan_ui"
+  [ -n "$public_ui" ] && ui_summary_row "🌏 公网" "$public_ui"
+  ui_summary_row "🖥 本机" "$local_ui"
+  [ -n "$secret" ] && ui_summary_row "🔑 密钥" "$secret"
   ui_summary_end
 }
 
@@ -404,10 +411,8 @@ ui_ok "[3/3] 启动服务..."
 # =========================
 
 
-secret="$(read_env_value "CLASH_SECRET")"
-public_ip="$(get_public_ip)"
 echo
-show_dashboard_info "$secret" "$public_ip"
+show_dashboard_info
 
 show_install_usage
 
