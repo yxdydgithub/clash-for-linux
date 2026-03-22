@@ -557,7 +557,10 @@ cmd_restart() {
 
 cmd_ui() {
   local raw="${1:-}"
-  local controller host port secret base_url
+  local controller host port secret
+  local local_ip public_ip public_host
+  local local_url public_url remote_url
+  local recommended_url recommended_label
 
   controller="$(read_runtime_config_value "external-controller" || true)"
   [ -n "${controller:-}" ] || controller="127.0.0.1:9090"
@@ -565,37 +568,76 @@ cmd_ui() {
   host="${controller%:*}"
   port="${controller##*:}"
 
+  secret="$(read_runtime_config_value "secret" || true)"
+
+  local_ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  [ -n "${local_ip:-}" ] || local_ip="127.0.0.1"
+
+  public_ip="$(curl -fsS --max-time 5 ifconfig.me 2>/dev/null || true)"
+
   case "$host" in
-    0.0.0.0|::|localhost)
-      host="$(curl -fsS --max-time 5 ifconfig.me 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}')"
-      [ -n "${host:-}" ] || host="127.0.0.1"
+    0.0.0.0|::|"")
+      public_host="${public_ip:-$local_ip}"
+      ;;
+    localhost|127.0.0.1)
+      public_host="${public_ip:-$local_ip}"
+      ;;
+    *)
+      public_host="$host"
       ;;
   esac
 
-  secret="$(read_runtime_config_value "secret" || true)"
-  base_url="http://${host}:${port}/ui"
+  local_url="http://${local_ip}:${port}/ui"
+  public_url="http://${public_host}:${port}/ui"
 
-  if [ -n "${secret:-}" ]; then
-    base_url="${base_url}/#/setup?hostname=${host}&port=${port}&secret=${secret}"
+  remote_url=""
+  if [ -n "${CLASH_DASHBOARD_PUBLIC_URL:-}" ]; then
+    remote_url="${CLASH_DASHBOARD_PUBLIC_URL%/}"
+  fi
+
+  recommended_url="$public_url"
+  recommended_label="公网"
+
+  if [ -n "$remote_url" ]; then
+    recommended_url="$remote_url"
+    recommended_label="远程"
   fi
 
   if [ "$raw" = "--raw" ]; then
-    printf '%s\n' "$base_url"
+    printf '%s\n' "$recommended_url"
     return 0
   fi
 
   ui_header "clashctl 面板"
 
   ui_blank
-  ui_summary_begin "面板访问"
-  ui_summary_row "控制地址" "$controller"
-  ui_summary_row "面板地址" "$base_url"
+  ui_summary_begin "😼 Clash Web 控制台"
+  ui_summary_row "推荐访问" "$recommended_url"
+  ui_summary_row "推荐类型" "$recommended_label"
   ui_summary_end
 
+  ui_blank
+  ui_summary_begin "其他访问方式"
+  ui_summary_row "内网" "$local_url"
+  ui_summary_row "公网" "$public_url"
+  if [ -n "$remote_url" ]; then
+    ui_summary_row "远程" "$remote_url"
+  fi
+  ui_summary_end
+
+  ui_blank
+  ui_summary_begin "连接信息"
+  ui_summary_row "控制地址" "$controller"
+  ui_summary_row "Web 密钥" "$( [ -n "${secret:-}" ] && printf '已配置' || printf '未配置' )"
+  ui_summary_end
+
+  ui_blank
+  ui_subheader "提示"
+  printf '  • 若无法访问，请放行端口 %s\n' "$port"
   if [ -n "${secret:-}" ]; then
-    ui_blank
-    ui_subheader "Web 密钥"
-    printf '  %s\n' "$secret"
+    printf '  • 首次打开面板后，输入 Web 密钥即可连接\n'
+  else
+    printf '  • 当前未配置 Web 密钥，可直接访问面板\n'
   fi
 }
 
