@@ -181,8 +181,8 @@ EOF
 }
 
 show_dashboard_info() {
-  local secret="$1"
-  local public_ip="$2"
+  local secret="${1:-}"
+  local public_ip="${2:-}"
 
   local controller_addr="${EXTERNAL_CONTROLLER:-127.0.0.1:9090}"
   local host="${controller_addr%:*}"
