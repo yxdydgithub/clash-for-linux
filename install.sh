@@ -181,7 +181,7 @@ show_dashboard_info() {
   if [ -n "$lan_ui" ]; then
     printf "║     🏠 内网：%-31s║\n" "$lan_ui"
   fi
-
+  echo $public_ui
   if [ -n "$public_ui" ] && [ "$host" = "0.0.0.0" ]; then
     printf "║     🌏 公网：%-31s║\n" "$public_ui"
   fi
