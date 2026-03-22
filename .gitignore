@@ -1,0 +1,17 @@
+# IDE
+.idea/
+.vscode/
+
+# Runtime config
+config.yaml
+config.yaml.*
+
+# Build / runtime artifacts
+resources/dist/
+resources/zip/*
+
+# 保留 dist.zip
+!resources/zip/dist.zip
+
+# 临时脚本
+test.sh
