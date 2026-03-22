@@ -1059,6 +1059,13 @@ cmd_status() {
 
   [ -n "${secret_value:-}" ] && secret_display="$secret_value"
 
+  proxy_port="$(read_runtime_config_value "mixed-port" || true)"
+  [ -z "$proxy_port" ] && proxy_port="$(read_runtime_config_value "port" || true)"
+  [ -z "$proxy_port" ] && proxy_port="-"
+
+  controller_addr="$(read_runtime_config_value "external-controller" || true)"
+  [ -z "$controller_addr" ] && controller_addr="-"
+
   ui_summary_begin "运行与服务"
   ui_summary_row "运行模式" "$mode"
   ui_summary_row "运行状态" "$running_text"
