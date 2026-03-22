@@ -151,7 +151,7 @@ show_dashboard_info() {
   local secret="$1"
   local public_ip="$2"
 
-  local controller_addr="${CLASH_CONTROLLER_ADDR:-127.0.0.1:9090}"
+  local controller_addr="${EXTERNAL_CONTROLLER:-127.0.0.1:9090}"
   local host="${controller_addr%:*}"
   local port="${controller_addr##*:}"
 
@@ -175,26 +175,15 @@ show_dashboard_info() {
     printf "║ %-*s ║\n" "$max_len" "$text"
   }
 
-  echo "╔═══════════════════════════════════════════════╗"
-  box_line "😼 Web 控制台"
-  echo "║═══════════════════════════════════════════════║"
-  box_line ""
-  box_line "🔓 注意放行端口：$port"
-
-  [ -n "$lan_ui" ] && box_line "🏠 内网：$lan_ui"
-  [ -n "$local_ui" ] && box_line "💻 本机：$local_ui"
-  [ -n "$public_ui" ] && box_line "🌏 公网：$public_ui"
-  [ -n "$custom_ui" ] && box_line "☁️ 公共：$custom_ui"
-
-  if [ "$host" != "0.0.0.0" ]; then
-    box_line "⚠ 当前仅本机监听，公网可能无法访问"
-  fi
-
-  box_line ""
-  echo "╚═══════════════════════════════════════════════╝"
-  echo
-  echo "😼 当前密钥：$secret"
-  echo "🎉 enjoy 🎉"
+  ui_blank
+  ui_summary_begin "😼 Web 控制台"
+  ui_summary_row "🔓 注意放行端口" "$port"
+  ui_summary_row "💻 内网" "$lan_ui"
+  ui_summary_row "☁️ 公共" "$custom_ui"
+  ui_summary_row ""
+  ui_summary_row "🌏 公网" "$public_ui"
+  ui_summary_row "😼 当前密钥" "$secret"
+  ui_summary_end
 }
 
 wait_dashboard_ready() {
