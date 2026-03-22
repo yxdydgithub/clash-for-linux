@@ -3,16 +3,8 @@
 **clash-for-linux** 是一个面向 Linux 服务器/桌面环境的 **Clash 自动化运行与管理脚本集**。
 项目基于 **Clash Meta / Mihomo 内核**，通过脚本方式实现 **开箱即用、可维护、可回滚** 的代理部署体验，适合用于提升服务器访问 GitHub、Docker Hub 等海外资源的速度。
 <p align="center">
-  <img src="docs/assets/1.png" width="30%">
-  <img src="docs/assets/2.png" width="30%">
-  <img src="docs/assets/3.png" width="30%">
+  <img src="docs/assets/5.png" width="100%">
 </p>
-
-本项目主要解决以下问题：
-- ✕ 官方 Clash 二进制下载、架构区分、配置部署繁琐
-- ✕ 手动管理 Clash 进程、端口、环境变量不稳定
-- ✕ systemd 服务、权限、安全配置缺乏统一方案
-- ✕ 多订阅 / 配置混乱，升级和回滚成本高
 
 ### 核心特性
 
@@ -46,7 +38,7 @@
 # 🚀 一键安装（推荐）
 
 ```
-git clone --branch master --depth 1 https://github.com/wnlen/clash-for-linux.git
+git clone --branch master --depth 1 https://ghfast.top/https://github.com/wnlen/clash-for-linux.git
 cd clash-for-linux
 bash install.sh
 ```
