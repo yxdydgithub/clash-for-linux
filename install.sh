@@ -209,8 +209,7 @@ prompt_and_apply_subscription() {
 
   while true; do
     echo
-    ui_subheader "订阅设置"
-    read -r -p "请输入要添加的订阅链接（直接回车可跳过）：" sub_url
+    read -r -p "✈️  请输入要添加的订阅链接：" sub_url
 
     if [ -z "${sub_url:-}" ]; then
       ui_warn "已跳过订阅设置，可稍后使用 clashctl sub 进行配置"
@@ -219,8 +218,7 @@ prompt_and_apply_subscription() {
 
     write_env_value "CLASH_URL" "$sub_url"
 
-    ui_info "正在下载订阅..."
-    ui_info "正在校验订阅配置..."
+    ui_info "⏳ 正在下载订阅..."
 
     if ! "$Install_Dir/scripts/generate_config.sh" >/dev/null 2>&1; then
       ui_error "订阅不可用或转换失败"
@@ -243,8 +241,8 @@ prompt_and_apply_subscription() {
       "$Install_Dir/scripts/run_clash.sh" --daemon
     fi
 
-    ui_ok "订阅添加成功：[1] $sub_url"
-    ui_ok "订阅已生效"
+    ui_ok "🎉 订阅添加成功：$sub_url"
+    ui_ok "🔥 订阅已生效"
 
 
 
@@ -412,5 +410,6 @@ public_ip="$(get_public_ip)"
 echo
 show_dashboard_info "$secret" "$public_ip"
 
+show_install_usage
 
 prompt_and_apply_subscription
