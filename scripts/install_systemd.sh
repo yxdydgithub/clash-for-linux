@@ -68,9 +68,4 @@ EOF
 systemctl daemon-reload
 systemctl enable "${SERVICE_NAME}.service" >/dev/null 2>&1 || true
 
-ui_ok "systemd unit installed: ${UNIT_PATH}"
-echo "start   : systemctl start ${SERVICE_NAME}.service"
-echo "stop    : systemctl stop ${SERVICE_NAME}.service"
-echo "restart : systemctl restart ${SERVICE_NAME}.service"
-echo "reload  : systemctl reload ${SERVICE_NAME}.service"
-echo "status  : systemctl status ${SERVICE_NAME}.service -l --no-pager"
+ui_ok "服务已注册，可通过 clashctl 管理"
