@@ -584,7 +584,19 @@ cmd_ui() {
     return 0
   fi
 
-  printf '%s\n' "$base_url"
+  ui_header "clashctl 面板"
+
+  ui_blank
+  ui_summary_begin "面板访问"
+  ui_summary_row "控制地址" "$controller"
+  ui_summary_row "面板地址" "$base_url"
+  ui_summary_end
+
+  if [ -n "${secret:-}" ]; then
+    ui_blank
+    ui_subheader "Web 密钥"
+    printf '  %s\n' "$secret"
+  fi
 }
 
 cmd_secret() {
