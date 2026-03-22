@@ -129,9 +129,16 @@ _ui_summary_inner_width() {
 ui_repeat() {
   local ch="$1"
   local n="$2"
+  local out=""
+  local i
 
   [ "$n" -le 0 ] && return 0
-  printf '%*s' "$n" '' | tr ' ' "$ch"
+
+  for ((i=0; i<n; i++)); do
+    out+="$ch"
+  done
+
+  printf '%s' "$out"
 }
 
 ui_blank() {
