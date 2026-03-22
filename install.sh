@@ -222,17 +222,17 @@ prompt_and_apply_subscription() {
 # =========================
 if ! resolve_clash_bin "$Install_Dir" "${CpuArch:-}" >/dev/null 2>&1; then
   die_with_reason \
-    "clash core not ready" \
-    "binary validation failed" \
-    "check download result or architecture mismatch"
+    "Clash 内核未就绪" \
+    "二进制校验失败" \
+    "请检查下载结果或 CPU 架构是否匹配"
 fi
 
-ui_ok "clash core validated"
+ui_ok "Clash 内核校验通过"
 
 # =========================
 # 安装 clashctl
 # =========================
-# ===== 安装/覆盖 clashctl 命令 =====
+# ===== 安装 / 覆盖 clashctl 命令 =====
 
 OLD_CLASHCTL_PATH="$(command -v clashctl 2>/dev/null || true)"
 OLD_CLASHCTL_REAL=""
@@ -244,7 +244,7 @@ chmod +x "$Install_Dir/clashctl"
 
 # 如果存在旧版本，打印提示
 if [ -n "$OLD_CLASHCTL_REAL" ] && [ "$OLD_CLASHCTL_REAL" != "$(readlink -f "$Install_Dir/clashctl")" ]; then
-  echo "[WARN] 检测到旧版 clashctl: $OLD_CLASHCTL_REAL"
+  echo "[WARN] 检测到旧版本 clashctl: $OLD_CLASHCTL_REAL"
   echo "[INFO] 将覆盖为当前版本: $Install_Dir/clashctl"
 fi
 
@@ -260,59 +260,64 @@ NEW_CLASHCTL_REAL="$(readlink -f /usr/local/bin/clashctl 2>/dev/null || true)"
 EXPECTED_CLASHCTL_REAL="$(readlink -f "$Install_Dir/clashctl" 2>/dev/null || true)"
 
 if [ "$NEW_CLASHCTL_REAL" != "$EXPECTED_CLASHCTL_REAL" ]; then
-  echo "[ERROR] clashctl 覆盖失败，系统命令未指向当前安装目录" >&2
+  echo "[ERROR] clashctl 安装失败：系统命令未指向当前安装目录" >&2
   exit 1
 fi
 
-echo "[OK] clashctl 已更新: /usr/local/bin/clashctl -> $EXPECTED_CLASHCTL_REAL"
+echo "[OK] clashctl 已更新: /usr/local/bin/clashctl → $EXPECTED_CLASHCTL_REAL"
 
 chmod +x "$Install_Dir/clashctl"
 
-ui_ok "clashctl installed: /usr/local/bin/clashctl"
+ui_ok "clashctl 安装完成: /usr/local/bin/clashctl"
 
 # =========================
 # 安装 proxy helper
 # =========================
-cat >/etc/profile.d/clash-for-linux.sh <<EOF
-# clash-for-linux proxy helpers
+# 不再注入 shell function，clashctl 统一走 /usr/local/bin/clashctl
+rm -f /etc/profile.d/clash-for-linux.sh >/dev/null 2>&1 || true
+rm -f /etc/profile.d/clash.sh >/dev/null 2>&1 || true
+rm -f /etc/profile.d/clashctl.sh >/dev/null 2>&1 || true
 
-# 清理旧版遗留函数/别名，避免旧 shell 注入污染新版本
-unset -f clashctl clashhelp clashlog clashmixin clashoff clashon clashproxy clashrestart clashsecret clashstatus clashsub clashtun clashui clashupgrade 2>/dev/null || true
-unalias clashctl 2>/dev/null || true
+# cat >/etc/profile.d/clash-for-linux.sh <<EOF
+# # clash-for-linux proxy helpers
 
-CLASH_INSTALL_DIR="${Install_Dir}"
-ENV_FILE="\${CLASH_INSTALL_DIR}/.env"
+# # 清理旧版遗留函数/别名，避免旧 shell 注入污染新版本
+# unset -f clashctl clashhelp clashlog clashmixin clashoff clashon clashproxy clashrestart clashsecret clashstatus clashsub clashtun clashui clashupgrade 2>/dev/null || true
+# unalias clashctl 2>/dev/null || true
 
-if [ -f "\$ENV_FILE" ]; then
-  set +u
-  . "\$ENV_FILE" >/dev/null 2>&1 || true
-  set -u
-fi
+# CLASH_INSTALL_DIR="${Install_Dir}"
+# ENV_FILE="\${CLASH_INSTALL_DIR}/.env"
 
-CLASH_LISTEN_IP="\${CLASH_LISTEN_IP:-127.0.0.1}"
-CLASH_HTTP_PORT="\${CLASH_HTTP_PORT:-7890}"
-CLASH_SOCKS_PORT="\${CLASH_SOCKS_PORT:-7891}"
+# if [ -f "\$ENV_FILE" ]; then
+#   set +u
+#   . "\$ENV_FILE" >/dev/null 2>&1 || true
+#   set -u
+# fi
 
-proxy_on() {
-  export http_proxy="http://\${CLASH_LISTEN_IP}:\${CLASH_HTTP_PORT}"
-  export https_proxy="http://\${CLASH_LISTEN_IP}:\${CLASH_HTTP_PORT}"
-  export HTTP_PROXY="http://\${CLASH_LISTEN_IP}:\${CLASH_HTTP_PORT}"
-  export HTTPS_PROXY="http://\${CLASH_LISTEN_IP}:\${CLASH_HTTP_PORT}"
-  export all_proxy="socks5://\${CLASH_LISTEN_IP}:\${CLASH_SOCKS_PORT}"
-  export ALL_PROXY="socks5://\${CLASH_LISTEN_IP}:\${CLASH_SOCKS_PORT}"
-  export no_proxy="127.0.0.1,localhost,::1"
-  export NO_PROXY="127.0.0.1,localhost,::1"
-  echo "[OK] Proxy enabled: http://\${CLASH_LISTEN_IP}:\${CLASH_HTTP_PORT}"
-}
+# CLASH_LISTEN_IP="\${CLASH_LISTEN_IP:-127.0.0.1}"
+# CLASH_HTTP_PORT="\${CLASH_HTTP_PORT:-7890}"
+# CLASH_SOCKS_PORT="\${CLASH_SOCKS_PORT:-7891}"
 
-proxy_off() {
-  unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
-  unset all_proxy ALL_PROXY no_proxy NO_PROXY
-  echo "[OK] Proxy disabled"
-}
-EOF
+# proxy_on() {
+#   export http_proxy="http://\${CLASH_LISTEN_IP}:\${CLASH_HTTP_PORT}"
+#   export https_proxy="http://\${CLASH_LISTEN_IP}:\${CLASH_HTTP_PORT}"
+#   export HTTP_PROXY="http://\${CLASH_LISTEN_IP}:\${CLASH_HTTP_PORT}"
+#   export HTTPS_PROXY="http://\${CLASH_LISTEN_IP}:\${CLASH_HTTP_PORT}"
+#   export all_proxy="socks5://\${CLASH_LISTEN_IP}:\${CLASH_SOCKS_PORT}"
+#   export ALL_PROXY="socks5://\${CLASH_LISTEN_IP}:\${CLASH_SOCKS_PORT}"
+#   export no_proxy="127.0.0.1,localhost,::1"
+#   export NO_PROXY="127.0.0.1,localhost,::1"
+#   echo "[OK] Proxy enabled: http://\${CLASH_LISTEN_IP}:\${CLASH_HTTP_PORT}"
+# }
 
-chmod 644 /etc/profile.d/clash-for-linux.sh
+# proxy_off() {
+#   unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
+#   unset all_proxy ALL_PROXY no_proxy NO_PROXY
+#   echo "[OK] Proxy disabled"
+# }
+# EOF
+
+# chmod 644 /etc/profile.d/clash-for-linux.sh
 
 # =========================
 # 安装 systemd
@@ -332,17 +337,17 @@ fi
 # 输出 + 订阅录入
 # =========================
 ui_blank
-ui_summary_begin "Installation Summary"
-ui_summary_row "Status" "Installed"
-ui_summary_row "Path" "$Install_Dir"
-ui_summary_row "clashctl" "/usr/local/bin/clashctl"
-ui_summary_row "Mode" "systemd"
+ui_summary_begin "安装信息"
+ui_summary_row "安装状态" "已完成"
+ui_summary_row "安装路径" "$Install_Dir"
+ui_summary_row "命令路径" "/usr/local/bin/clashctl"
+ui_summary_row "运行模式" "systemd"
 ui_summary_end
 
 prompt_and_apply_subscription
 
 echo
-echo "Commands:"
+echo "命令:"
 echo "  clashctl status"
 echo "  clashctl logs"
 echo "  clashctl restart"
