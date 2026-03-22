@@ -2,6 +2,14 @@
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+if ! declare -f ui_info >/dev/null 2>&1; then
+  # shellcheck source=scripts/ui.sh
+  source "$PROJECT_DIR/scripts/ui.sh"
+fi
+
+
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUNTIME_DIR="$PROJECT_DIR/runtime"
 PID_FILE="$RUNTIME_DIR/clash.pid"
 STATE_FILE="$RUNTIME_DIR/state.env"
@@ -121,7 +129,7 @@ start_via_script() {
   cleanup_dead_pid
 
   if is_script_running; then
-    echo "[INFO] clash already running (script)"
+    ui_info "clash already running (script)"
     return 0
   fi
 
@@ -133,7 +141,7 @@ stop_via_script() {
   pid="$(read_pid 2>/dev/null || true)"
 
   if [ -n "${pid:-}" ] && is_pid_running "$pid"; then
-    echo "[INFO] stopping clash pid=$pid"
+    ui_info "stopping clash pid=$pid"
 
     kill "$pid" 2>/dev/null || true
 

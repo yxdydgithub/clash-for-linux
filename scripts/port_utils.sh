@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+if ! declare -f ui_info >/dev/null 2>&1; then
+  # shellcheck source=scripts/ui.sh
+  source "$PROJECT_DIR/scripts/ui.sh"
+fi
+
 PORT_CHECK_WARNED=${PORT_CHECK_WARNED:-0}
 
 # =========================
@@ -25,7 +32,7 @@ is_port_in_use() {
 	fi
 
 	if [ "$PORT_CHECK_WARNED" -eq 0 ]; then
-		echo "[WARN] 未检测到端口检查工具（ss/netstat/lsof）" >&2
+		ui_warn "未检测到端口检查工具（ss/netstat/lsof）" >&2
 		PORT_CHECK_WARNED=1
 	fi
 
@@ -73,17 +80,17 @@ resolve_port_value() {
   # auto / 空
   if [ -z "$value" ] || [ "$value" = "auto" ]; then
     resolved=$(find_available_port) || {
-      echo "[ERROR] ${name} 端口分配失败" >&2
+      ui_error "${name} 端口分配失败" >&2
       return 1
     }
-    echo "[WARN] ${name} 自动分配端口: ${resolved}" >&2
+    ui_warn "${name} 自动分配端口: ${resolved}" >&2
     echo "$resolved"
     return 0
   fi
 
   # 非数字
   if ! [[ "$value" =~ ^[0-9]+$ ]]; then
-    echo "[ERROR] 非法端口: $value" >&2
+    ui_error "非法端口: $value" >&2
     return 1
   fi
 
@@ -91,7 +98,7 @@ resolve_port_value() {
   if is_port_in_use "$value"; then
     resolved=$(find_available_port)
     if [ -n "$resolved" ]; then
-      echo "[WARN] ${name} 端口 ${value} 已被占用，已切换为 ${resolved}" >&2
+      ui_warn "${name} 端口 ${value} 已被占用，已切换为 ${resolved}" >&2
       echo "$resolved"
       return 0
     fi

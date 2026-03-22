@@ -2,6 +2,13 @@
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+if ! declare -f ui_info >/dev/null 2>&1; then
+  # shellcheck source=scripts/ui.sh
+  source "$PROJECT_DIR/scripts/ui.sh"
+fi
+
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUNTIME_DIR="$PROJECT_DIR/runtime"
 CONFIG_DIR="$PROJECT_DIR/config"
 LOG_DIR="$PROJECT_DIR/logs"
@@ -46,35 +53,60 @@ CLASH_SOCKS_PORT="$(resolve_port_value "SOCKS" "$CLASH_SOCKS_PORT")"
 CLASH_REDIR_PORT="$(resolve_port_value "REDIR" "$CLASH_REDIR_PORT")"
 EXTERNAL_CONTROLLER="$(resolve_host_port "External Controller" "$EXTERNAL_CONTROLLER" "127.0.0.1")"
 
+trim_value() {
+  local s="$1"
+  s="${s#"${s%%[![:space:]]*}"}"
+  s="${s%"${s##*[![:space:]]}"}"
+  printf '%s' "$s"
+}
+
 write_state() {
   local status="$1"
   local reason="$2"
   local source="${3:-unknown}"
 
   cat > "$STATE_FILE" <<EOF
-  LAST_GENERATE_STATUS=$status
-  LAST_GENERATE_REASON=$reason
-  LAST_CONFIG_SOURCE=$source
-  LAST_GENERATE_AT=$(date -Iseconds)
+LAST_GENERATE_STATUS=$status
+LAST_GENERATE_REASON=$reason
+LAST_CONFIG_SOURCE=$source
+LAST_GENERATE_AT=$(date -Iseconds)
 EOF
+}
+
+fail_with_state() {
+  local reason="$1"
+  local message="$2"
+  local source="${3:-none}"
+
+  write_state "failed" "$reason" "$source"
+  ui_error "$message" >&2
+  exit 1
 }
 
 write_env_value() {
   local key="$1"
   local value="$2"
   local env_file="$PROJECT_DIR/.env"
-  local escaped="${value//\\/\\\\}"
-  escaped="${escaped//&/\\&}"
-  escaped="${escaped//|/\\|}"
-  escaped="${escaped//\'/\'\\\'\'}"
+  local tmp_file
 
   [ -f "$env_file" ] || return 1
 
-  if grep -qE "^[[:space:]]*(export[[:space:]]+)?${key}=" "$env_file"; then
-    sed -i -E "s|^[[:space:]]*(export[[:space:]]+)?${key}=.*$|export ${key}='${escaped}'|g" "$env_file"
-  else
-    printf "export %s='%s'\n" "$key" "$value" >> "$env_file"
-  fi
+  tmp_file="$(mktemp)"
+
+  awk -v k="$key" -v v="$value" '
+    BEGIN { updated = 0 }
+    $0 ~ "^[[:space:]]*(export[[:space:]]+)?" k "=" {
+      print "export " k "='\''" v "'\''"
+      updated = 1
+      next
+    }
+    { print }
+    END {
+      if (!updated) {
+        print "export " k "='\''" v "'\''"
+      }
+    }
+  ' "$env_file" > "$tmp_file" && mv "$tmp_file" "$env_file"
 }
 
 generate_secret() {
@@ -138,8 +170,7 @@ apply_controller_to_config() {
     upsert_yaml_kv_local "$file" "external-controller" "$EXTERNAL_CONTROLLER"
 
     if [ ! -f "$ui_src/index.html" ]; then
-      echo "[ERROR] UI 未找到: $ui_src/index.html" >&2
-      exit 1
+      fail_with_state "ui_missing" "UI 未找到: $ui_src/index.html" "none"
     fi
 
     rm -rf "$ui_dir"
@@ -153,19 +184,83 @@ apply_controller_to_config() {
   fi
 }
 
-download_subscription() {
-  [ -n "$CLASH_URL" ] || return 1
+validate_clash_url() {
+  local url="$1"
 
-  local curl_cmd=(curl -fL -S --retry 2 --connect-timeout 10 -m 30 -o "$TMP_DOWNLOAD")
-  [ "$ALLOW_INSECURE_TLS" = "true" ] && curl_cmd+=(-k)
+  url="$(trim_value "$url")"
+
+  if [ -z "$url" ]; then
+    write_state "failed" "url_empty" "none"
+    ui_error "CLASH_URL 为空" >&2
+    return 1
+  fi
+
+  case "$url" in
+    http://*|https://*)
+      ;;
+    *)
+      write_state "failed" "url_invalid" "none"
+      ui_error "CLASH_URL 格式非法：必须以 http:// 或 https:// 开头" >&2
+      return 1
+      ;;
+  esac
+
+  if [[ "$url" =~ [[:space:]] ]]; then
+    write_state "failed" "url_whitespace" "none"
+    ui_error "CLASH_URL 含有空白字符" >&2
+    return 1
+  fi
+
+  if [[ "$url" == "-"* ]]; then
+    write_state "failed" "url_like_option" "none"
+    ui_error "CLASH_URL 非法：看起来像 curl 参数而不是链接" >&2
+    return 1
+  fi
+
+  return 0
+}
+
+download_subscription() {
+  local url
+  url="$(trim_value "${CLASH_URL:-}")"
+
+  validate_clash_url "$url" || return 1
+
+  local curl_cmd=(
+    curl
+    -fL
+    -S
+    --retry 2
+    --connect-timeout 10
+    -m 30
+    -o "$TMP_DOWNLOAD"
+    --
+    "$url"
+  )
+
+  if [ "$ALLOW_INSECURE_TLS" = "true" ]; then
+    curl_cmd=(
+      curl
+      -fL
+      -S
+      --retry 2
+      --connect-timeout 10
+      -m 30
+      -k
+      -o "$TMP_DOWNLOAD"
+      --
+      "$url"
+    )
+  fi
 
   if [ -n "${CLASH_HEADERS:-}" ]; then
+    local header
     while IFS= read -r header; do
-      [ -n "$header" ] && curl_cmd+=(-H "$header")
+      header="$(trim_value "$header")"
+      [ -n "$header" ] && curl_cmd=("${curl_cmd[@]:0:${#curl_cmd[@]}-2}" -H "$header" -- "$url")
     done < <(printf '%s\n' "$CLASH_HEADERS" | tr ';' '\n')
   fi
 
-  curl_cmd+=("$CLASH_URL")
   "${curl_cmd[@]}"
 }
 
@@ -208,21 +303,23 @@ main() {
       exit 0
     fi
 
-    echo "[错误] 已关闭自动更新，且运行配置缺失: $RUNTIME_CONFIG" >&2
-    write_state "failed" "runtime_missing" "none"
-    exit 1
+    fail_with_state "runtime_missing" "已关闭自动更新，且运行配置缺失: $RUNTIME_CONFIG" "none"
   fi
 
-  if [ -z "${CLASH_URL:-}" ]; then
-    echo "[错误] 未设置 CLASH_URL" >&2
-    write_state "failed" "url_missing" "none"
+  CLASH_URL="$(trim_value "${CLASH_URL:-}")"
+
+  if ! validate_clash_url "$CLASH_URL"; then
     exit 1
   fi
 
   if ! download_subscription; then
-    echo "[错误] 下载订阅失败" >&2
     write_state "failed" "download_failed" "none"
+    ui_error "下载订阅失败" >&2
     exit 1
+  fi
+
+  if [ ! -s "$TMP_DOWNLOAD" ]; then
+    fail_with_state "subscription_empty" "订阅下载成功但内容为空" "none"
   fi
 
   cp -f "$TMP_DOWNLOAD" "$TMP_NORMALIZED"
@@ -236,17 +333,19 @@ main() {
     exit 0
   fi
 
+  if ! grep -qE '^[[:space:]]*proxies:' "$TMP_NORMALIZED"; then
+    fail_with_state "subscription_invalid" "订阅不可用或转换失败" "none"
+  fi
+
   if [ ! -s "$template_file" ]; then
-    echo "[错误] 缺少模板配置文件: $template_file" >&2
-    write_state "failed" "missing_template" "none"
-    exit 1
+    fail_with_state "missing_template" "缺少模板配置文件: $template_file" "none"
   fi
 
   build_fragment_config "$template_file" "$TMP_CONFIG"
   apply_controller_to_config "$TMP_CONFIG"
   apply_secret_to_config "$TMP_CONFIG"
-
   finalize_config "$TMP_CONFIG"
+
   write_state "success" "subscription_fragment_merged" "subscription_fragment"
 }
 

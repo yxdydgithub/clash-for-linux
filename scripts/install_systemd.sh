@@ -2,6 +2,13 @@
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+if ! declare -f ui_info >/dev/null 2>&1; then
+  # shellcheck source=scripts/ui.sh
+  source "$PROJECT_DIR/scripts/ui.sh"
+fi
+
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SERVICE_NAME="clash-for-linux"
 UNIT_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
 
@@ -13,7 +20,7 @@ LOG_DIR="$PROJECT_DIR/logs"
 CONFIG_DIR="$PROJECT_DIR/config"
 
 if [ "$(id -u)" -ne 0 ]; then
-  echo "[ERROR] 安装 systemd 服务需要 root 权限" >&2
+  ui_error "安装 systemd 服务需要 root 权限" >&2
   exit 1
 fi
 
@@ -61,9 +68,4 @@ EOF
 systemctl daemon-reload
 systemctl enable "${SERVICE_NAME}.service" >/dev/null 2>&1 || true
 
-echo "[OK] systemd unit installed: ${UNIT_PATH}"
-echo "start   : systemctl start ${SERVICE_NAME}.service"
-echo "stop    : systemctl stop ${SERVICE_NAME}.service"
-echo "restart : systemctl restart ${SERVICE_NAME}.service"
-echo "reload  : systemctl reload ${SERVICE_NAME}.service"
-echo "status  : systemctl status ${SERVICE_NAME}.service -l --no-pager"
+# ui_ok "服务已注册，可通过 clashctl 管理"

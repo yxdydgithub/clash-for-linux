@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+if ! declare -f ui_info >/dev/null 2>&1; then
+  # shellcheck source=scripts/ui.sh
+  source "$PROJECT_DIR/scripts/ui.sh"
+fi
+
 trim_value() {
 	local value="$1"
 	echo "$value" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
@@ -123,7 +130,7 @@ apply_mixin_config() {
 				echo "# ---- mixin: ${path} ----"
 				cat "$path"
 			else
-				echo "[WARN] Mixin not found: $path" >&2
+				ui_warn "Mixin not found: $path" >&2
 			fi
 		done
 
