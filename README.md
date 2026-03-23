@@ -1,29 +1,24 @@
-# 项目简介
+<h1 align="center">
+  Linux 一键安装 Clash</a>
+  <br>
+</h1>
 
-![GitHub License](https://img.shields.io/github/license/wnlen/clash-for-linux)
-![GitHub top language](https://img.shields.io/github/languages/top/wnlen/clash-for-linux)
-![GitHub Repo stars](https://img.shields.io/github/stars/wnlen/clash-for-linux)
-
-**clash-for-linux** 是一个面向 Linux 服务器 / 桌面环境的 **Clash（Mihomo）运行与管理工具**。
-
-项目基于 **Clash Meta / Mihomo 内核**，将内核准备、配置生成、服务托管与订阅更新等流程统一收敛为一套可执行的工程化方案，实现 **开箱即用、可维护、可回滚** 的稳定运行体验。
+<h3 align="center">
+一个面向 Linux 的 Clash(<a href="https://github.com/MetaCubeX/mihomo">Mihomo</a>)管理工具。
+</h3>
 
 <p align="center">
   <img src="docs/assets/5.png" width="100%">
 </p>
+# ✨ 核心特性
 
-### 核心特性
-
-- 🚀 **自动识别系统架构**（x86_64/amd64、aarch64/arm64、armv7l/armv7），自动下载并使用对应 Clash 内核
-- 🧩 **脚本化部署**，无需手动安装依赖，适合服务器与无桌面环境
-- 🔧 **systemd 服务管理**，支持 start / stop / restart / enable
-- 🗂️ **清晰的目录结构**，配置、日志、二进制、mixin 分离，便于维护与回滚
-- 🔐 **安全默认配置**，自动生成或自定义 Secret
-- 🩺 **内置诊断工具（`doctor`）**，快速排障 
+- 🚀 **自动识别系统架构**，自动下载并使用对应 Clash 内核
 - 🧪 **端口自动检测与分配**，避免冲突
 - 🔄 **多订阅管理（clashctl）**，支持自动订阅切换
 - 🧠 **Mixin 机制**，可按需追加/覆盖 Clash 配置
 - 🌐 **Tun 模式支持**（需 Clash Meta / Premium）
+- 🔐 **安全默认配置**，自动生成或自定义 Secret
+- 🩺 **内置诊断工具（`doctor`）**，快速排障 
 
 ### 适用场景
 
