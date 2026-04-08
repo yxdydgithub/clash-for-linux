@@ -1,124 +1,86 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-Server_Dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=scripts/ui.sh
-. "$Server_Dir/scripts/ui.sh"
-
-SERVICE_NAME="clash-for-linux"
-UNIT_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
-INSTALL_DIR="${CLASH_INSTALL_DIR:-$(cd "$(dirname "$0")" && pwd)}"
-
-CLASHCTL_LINK="/usr/local/bin/clashctl"
-PROFILED_FILE="/etc/profile.d/clash-for-linux.sh"
-
-PURGE=false
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PURGE_RUNTIME="false"
+DEV_RESET="false"
 
 for arg in "$@"; do
   case "$arg" in
-    --purge)
-      PURGE=true
+    --purge-runtime)
+      PURGE_RUNTIME="true"
+      ;;
+    --dev-reset)
+      DEV_RESET="true"
       ;;
     *)
-      ui_error "未知参数: $arg" >&2
-      echo "用法: uninstall.sh [--purge]" >&2
+      echo "未知参数：$arg" >&2
+      echo "用法：bash uninstall.sh [--dev-reset] [--purge-runtime]" >&2
       exit 2
       ;;
   esac
 done
 
-log()   { printf "%b\n" "$*"; }
-ok()    { log "\033[32m[OK]\033[0m $*"; }
-warn()  { log "\033[33m[WARN]\033[0m $*"; }
-err()   { log "\033[31m[ERROR]\033[0m $*"; }
+# shellcheck source=scripts/core/common.sh
+source "$PROJECT_DIR/scripts/core/common.sh"
+# shellcheck source=scripts/core/runtime.sh
+source "$PROJECT_DIR/scripts/core/runtime.sh"
+# shellcheck source=scripts/init/systemd.sh
+source "$PROJECT_DIR/scripts/init/systemd.sh"
+# shellcheck source=scripts/init/systemd-user.sh
+source "$PROJECT_DIR/scripts/init/systemd-user.sh"
+# shellcheck source=scripts/init/script.sh
+source "$PROJECT_DIR/scripts/init/script.sh"
 
-if [ "$(id -u)" -ne 0 ]; then
-  err "卸载需要 root 权限"
-  exit 1
-fi
+init_project_context "$PROJECT_DIR"
+load_env_if_exists
+detect_install_scope auto
 
-ui_info "正在卸载 clash-for-linux..."
+service_stop || true
+remove_runtime_entry || true
+remove_clashctl_entry || true
+remove_shell_alias_entry || true
 
-# =========================
-# 停止服务
-# =========================
-if command -v systemctl >/dev/null 2>&1; then
-  systemctl stop "${SERVICE_NAME}.service" >/dev/null 2>&1 || true
-  systemctl disable "${SERVICE_NAME}.service" >/dev/null 2>&1 || true
-fi
+if [ "$PURGE_RUNTIME" = "true" ]; then
+  rm -rf "$RUNTIME_DIR"
+  echo "🗑️ 已删除运行目录：$RUNTIME_DIR"
+  echo "🧩 保留内容：项目目录仍在"
+elif [ "$DEV_RESET" = "true" ]; then
+  cache_backup_dir="$(mktemp -d)"
+  cache_restore_needed="false"
+  subscriptions_backup_file="$cache_backup_dir/subscriptions.yaml"
+  subscriptions_restore_needed="false"
 
-# =========================
-# 停止进程（仅当前项目）
-# =========================
-PID_FILE="${INSTALL_DIR}/runtime/clash.pid"
-
-if [ -f "$PID_FILE" ]; then
-  PID="$(cat "$PID_FILE" 2>/dev/null || true)"
-
-  if [ -n "${PID:-}" ] && kill -0 "$PID" 2>/dev/null; then
-    ui_info "正在停止进程 pid=$PID"
-    kill "$PID" 2>/dev/null || true
-    sleep 1
-
-    if kill -0 "$PID" 2>/dev/null; then
-      ui_warn "强制结束进程 -9 $PID"
-      kill -9 "$PID" 2>/dev/null || true
-    fi
+  if [ -d "$RUNTIME_DIR/cache" ]; then
+    cp -a "$RUNTIME_DIR/cache" "$cache_backup_dir/" 2>/dev/null || true
+    cache_restore_needed="true"
   fi
 
-  rm -f "$PID_FILE"
-fi
-
-# =========================
-# 删除 systemd
-# =========================
-if [ -f "$UNIT_PATH" ]; then
-  rm -f "$UNIT_PATH"
-  ok "已移除 systemd 服务"
-fi
-
-if command -v systemctl >/dev/null 2>&1; then
-  systemctl daemon-reload >/dev/null 2>&1 || true
-  systemctl reset-failed >/dev/null 2>&1 || true
-fi
-
-# =========================
-# 删除命令入口
-# =========================
-# 清理当前 shell 代理（如果存在）
-unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
-unset all_proxy ALL_PROXY no_proxy NO_PROXY
-
-rm -f "$CLASHCTL_LINK" >/dev/null 2>&1 || true
-rm -f "$PROFILED_FILE" >/dev/null 2>&1 || true
-rm -f /usr/bin/clashctl >/dev/null 2>&1 || true
-rm -f /etc/profile.d/clash.sh >/dev/null 2>&1 || true
-rm -f /etc/profile.d/clashctl.sh >/dev/null 2>&1 || true
-
-ok "已清理命令入口及环境变量"
-
-# =========================
-# 删除安装目录
-# =========================
-if [ "$PURGE" = true ]; then
-  if [ -d "$INSTALL_DIR" ]; then
-    rm -rf "$INSTALL_DIR"
-    ok "已删除安装目录: $INSTALL_DIR"
-  else
-    warn "未找到安装目录: $INSTALL_DIR"
+  if [ -f "$CONFIG_DIR/subscriptions.yaml" ]; then
+    cp -f "$CONFIG_DIR/subscriptions.yaml" "$subscriptions_backup_file" 2>/dev/null || true
+    subscriptions_restore_needed="true"
   fi
+
+  clean_runtime_state
+
+  if [ "$cache_restore_needed" = "true" ] && [ -d "$cache_backup_dir/cache" ]; then
+    mkdir -p "$RUNTIME_DIR"
+    rm -rf "$RUNTIME_DIR/cache" 2>/dev/null || true
+    mv "$cache_backup_dir/cache" "$RUNTIME_DIR/cache"
+  fi
+
+  if [ "$subscriptions_restore_needed" = "true" ] && [ -f "$subscriptions_backup_file" ]; then
+    mkdir -p "$CONFIG_DIR"
+    cp -f "$subscriptions_backup_file" "$CONFIG_DIR/subscriptions.yaml"
+  fi
+
+  rm -rf "$cache_backup_dir" 2>/dev/null || true
+
+  echo "🧪 已清理安装状态：$RUNTIME_DIR"
+  echo "🧩 保留内容：subscriptions.yaml、下载缓存与项目目录仍在"
 else
-  warn "安装目录已保留: $INSTALL_DIR"
-  echo "如需删除，请执行：bash uninstall.sh --purge"
+  echo "📦 已卸载安装入口，保留运行目录：$RUNTIME_DIR"
+  echo "🧩 保留内容：runtime 数据仍在"
 fi
 
-# =========================
-# 提示：当前终端代理变量需要手动清
-# =========================
-echo
-warn "如果你曾执行 proxy_on，当前终端可能仍保留代理环境变量。可执行："
-echo "  unset http_proxy https_proxy no_proxy HTTP_PROXY HTTPS_PROXY NO_PROXY"
-echo "  # 或关闭终端重新打开"
-
-echo
-ok "卸载完成"
+echo "🟢 卸载完成"

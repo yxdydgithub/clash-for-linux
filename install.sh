@@ -1,446 +1,59 @@
 #!/usr/bin/env bash
 set -euo pipefail
+sed -i 's/\r$//' "$0" 2>/dev/null || true
 
-Server_Dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=scripts/ui.sh
-. "$Server_Dir/scripts/ui.sh"
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-Install_Dir="${CLASH_INSTALL_DIR:-$Server_Dir}"
+source "$PROJECT_DIR/scripts/core/common.sh"
+source "$PROJECT_DIR/scripts/core/runtime.sh"
+source "$PROJECT_DIR/scripts/core/config.sh"
+source "$PROJECT_DIR/scripts/init/systemd.sh"
+source "$PROJECT_DIR/scripts/init/systemd-user.sh"
+source "$PROJECT_DIR/scripts/init/script.sh"
 
-Service_Name="clash-for-linux"
-Service_User="root"
-Service_Group="root"
+init_project_context "$PROJECT_DIR"
+load_env_if_exists
+detect_install_scope "${1:-auto}"
 
-# =========================
-# 基础校验
-# =========================
-ui_ok "[1/3] 准备环境..."
+init_layout
+ensure_required_commands
 
-if [ "$(id -u)" -ne 0 ]; then
-  die "需要 root 权限"
-fi
-# ui_ok "已确认 root 权限"
+ui_download "正在准备安装依赖"
+resolve_runtime_kernel
+resolve_yq
+resolve_subconverter
 
-if [ ! -f "${Server_Dir}/.env" ]; then
-  die_with_reason \
-    ".env 文件不存在" \
-    "缺少文件: ${Server_Dir}/.env" \
-    "请确认项目目录完整"
-fi
-# ui_ok "已检测到 .env 配置文件"
+mark_install_environment || true
+mark_install_plan || true
+mark_install_port_plan || true
 
-# =========================
-# 同步文件
-# =========================
-# ui_blank
-# ui_info "[2/5] 初始化目录"
+install_clashctl_entry
+install_shell_alias_entry
+install_runtime_entry
 
-mkdir -p "$Install_Dir"
-# ui_ok "安装目录已就绪: $Install_Dir"
+ensure_subscription_bootstrap_for_install "default"
+prompt_subscription_if_needed
 
-chmod +x "$Install_Dir"/clashctl 2>/dev/null || true
-chmod +x "$Install_Dir"/scripts/* 2>/dev/null || true
-chmod +x "$Install_Dir"/bin/* 2>/dev/null || true
-
-# =========================
-# 目录初始化
-# =========================
-mkdir -p \
-  "$Install_Dir/runtime" \
-  "$Install_Dir/logs" \
-  "$Install_Dir/config/mixin.d"
-
-# ui_ok "runtime 目录已创建"
-# ui_ok "logs 目录已创建"
-# ui_ok "mixin 目录已创建"
-
-# =========================
-# 加载 env
-# =========================
-# shellcheck disable=SC1090
-# ui_blank
-ui_ok "[2/3] 生成配置..."
-
-source "$Install_Dir/.env"
-
-# ui_ok ".env 配置已加载"
-
-# shellcheck disable=SC1090
-source "$Install_Dir/scripts/get_cpu_arch.sh"
-
-# ui_ok "CPU 架构识别成功: ${CpuArch:-unknown}"
-
-# shellcheck disable=SC1090
-source "$Install_Dir/scripts/resolve_clash.sh"
-
-# ui_blank
-# ui_info "准备内核"
-
-if ! bash "$Install_Dir/scripts/resolve_clash.sh"; then
-  ui_error "Clash 内核准备失败"
-  ui_fix_block \
-    "resolve_clash.sh 执行失败" \
-    "请检查下载地址或网络连接"
-  ui_debug_block \
-    "bash $Install_Dir/scripts/resolve_clash.sh"
-  exit 1
-fi
-
-write_env_value() {
-  local key="$1"
-  local value="$2"
-  local env_file="$Install_Dir/.env"
-  local escaped="${value//\\/\\\\}"
-  escaped="${escaped//&/\\&}"
-  escaped="${escaped//|/\\|}"
-  escaped="${escaped//\'/\'\\\'\'}"
-
-  if grep -qE "^[[:space:]]*(export[[:space:]]+)?${key}=" "$env_file"; then
-    sed -i -E "s|^[[:space:]]*(export[[:space:]]+)?${key}=.*$|export ${key}='${escaped}'|g" "$env_file"
+if [ -n "$(subscription_url 2>/dev/null || true)" ]; then
+  if generate_config; then
+    post_install_verify
   else
-    printf "export %s='%s'\n" "$key" "$value" >> "$env_file"
-  fi
-}
+    write_runtime_value "INSTALL_VERIFY_CONFIG_READY" "false"
+    write_runtime_value "INSTALL_VERIFY_RUNTIME_READY" "false"
+    write_runtime_value "INSTALL_VERIFY_CONTROLLER_READY" "false"
 
-
-if [ -z "${CLASH_SECRET:-}" ]; then
-  if command -v openssl >/dev/null 2>&1; then
-    CLASH_SECRET="$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9' | head -c 16)"
-  else
-    CLASH_SECRET="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 16)"
-  fi
-  write_env_value "CLASH_SECRET" "$CLASH_SECRET"
-fi
-
-read_env_value() {
-  local key="$1"
-  sed -nE "s/^[[:space:]]*(export[[:space:]]+)?${key}=['\"]?([^'\"]*)['\"]?$/\2/p" "$Install_Dir/.env" | head -n 1
-}
-
-mask_secret() {
-  local s="$1"
-  local len=${#s}
-
-  [ -z "$s" ] && return 0
-
-  if [ "$len" -le 8 ]; then
-    printf '%s\n' '********'
-    return 0
-  fi
-
-  printf '%s****%s\n' "${s:0:4}" "${s: -4}"
-}
-
-get_display_secret() {
-  local secret="$1"
-
-  case "${CLASH_SHOW_SECRET:-false}" in
-    true|TRUE|1|yes|YES)
-      printf '%s\n' "$secret"
-      return 0
-      ;;
-  esac
-
-  case "${CLASH_SHOW_SECRET_MASKED:-true}" in
-    true|TRUE|1|yes|YES)
-      mask_secret "$secret"
-      return 0
-      ;;
-  esac
-
-  printf '%s\n' ""
-}
-
-get_public_ip() {
-  curl -fsS --max-time 5 ifconfig.me 2>/dev/null \
-    || curl -fsS --max-time 5 ip.sb 2>/dev/null \
-    || curl -fsS --max-time 5 api.ipify.org 2>/dev/null \
-    || true
-}
-
-get_lan_ip() {
-  hostname -I 2>/dev/null | awk '{print $1}' || true
-}
-
-show_install_usage() {
-  cat <<'EOF'
-
-用法:
-  clashctl 命令 [选项]
-
-指令:
-  on                     开启代理
-  off                    关闭代理
-  start                  启动 Clash
-  stop                   停止 Clash
-  restart                重启并自动应用当前配置
-  status                 查看当前状态
-  update                 更新到最新版本并自动应用配置
-  ui                     输出 Dashboard 地址
-  secret                 输出当前 secret
-  doctor                 健康检查
-  logs [-f] [-n 100]     查看日志
-  sub show|update        查看订阅地址 / 输入或更新订阅并立即生效
-  tun status|on|off      查看/启用/关闭 Tun
-  mixin status|on|off    查看/启用/关闭 Mixin
-
-选
-  -h, --help             显示帮助信息
-EOF
-}
-
-show_dashboard_info() {
-  local secret="${1:-}"
-  local public_ip="${2:-}"
-
-  local controller_addr="${EXTERNAL_CONTROLLER:-127.0.0.1:9090}"
-  local host="${controller_addr%:*}"
-  local port="${controller_addr##*:}"
-
-  local lan_ip=""
-  lan_ip="$(get_lan_ip)"
-
-  local local_ui="http://127.0.0.1:${port}/ui"
-  local lan_ui=""
-  local public_ui=""
-  local custom_ui="${CLASH_DASHBOARD_PUBLIC_URL:-}"
-
-  [ -n "$lan_ip" ] && lan_ui="http://${lan_ip}:${port}/ui"
-  [ -n "$public_ip" ] && public_ui="http://${public_ip}:${port}/ui"
-
-  ui_blank
-  ui_summary_begin "😼 Clash Web 控制台"
-  ui_summary_row "🔓 注意放行端口" "$port"
-  [ -n "$lan_ui" ] && ui_summary_row "💻 内网" "$lan_ui"
-  [ -n "$custom_ui" ] && ui_summary_row "🌐 公共" "$custom_ui"
-  [ -n "$public_ui" ] && ui_summary_row "🌏 公网" "$public_ui"
-  [ -n "$secret" ] && ui_summary_row "🔑 密钥" "$secret"
-  ui_summary_end
-}
-
-wait_dashboard_ready() {
-  local host="$1"
-  local port="${2:-9090}"
-  local max_retry="${3:-20}"
-  local i
-
-  for ((i=1; i<=max_retry; i++)); do
-    if curl -fsS --max-time 2 "http://${host}:${port}/ui/" >/dev/null 2>&1; then
-      return 0
-    fi
-    sleep 1
-  done
-
-  return 1
-}
-
-prompt_and_apply_subscription() {
-  local sub_url=""
-  local secret=""
-  local public_ip=""
-  local retry_choice=""
-
-  while true; do
     echo
-    read -r -p "👉 请输入要添加的订阅链接：" sub_url
-
-    if [ -z "${sub_url:-}" ]; then
-      ui_warn "已跳过订阅设置，可稍后使用 clashctl sub 进行配置"
-      return 0
+    echo "🔴 安装未完成：订阅编译失败"
+    if [ -n "$(read_build_value "BUILD_LAST_ERROR_SUMMARY" 2>/dev/null || true)" ]; then
+      echo "❌ 原因：$(read_build_value "BUILD_LAST_ERROR_SUMMARY" 2>/dev/null || true)"
     fi
-
-    write_env_value "CLASH_URL" "$sub_url"
-
-    echo "⏳ 正在下载订阅..."
-
-    if ! "$Install_Dir/scripts/generate_config.sh" >/dev/null 2>&1; then
-      ui_error "订阅不可用或转换失败"
-
-      read -r -p "是否重新输入订阅链接？[Y/n]: " retry_choice
-      case "${retry_choice:-Y}" in
-        n|N)
-          ui_warn "已跳过订阅设置，可稍后使用 clashctl sub 进行配置"
-          return 0
-          ;;
-        *)
-          continue
-          ;;
-      esac
+    if [ -f "$RUNTIME_DIR/tmp/subscription-invalid-preview.txt" ]; then
+      echo "🧾 调试预览：$RUNTIME_DIR/tmp/subscription-invalid-preview.txt"
     fi
-
-    if command -v systemctl >/dev/null 2>&1; then
-      systemctl restart "${Service_Name}.service"
-    else
-      "$Install_Dir/scripts/run_clash.sh" --daemon
-    fi
-
-    echo "🎉 订阅添加成功：$sub_url"
-    echo "🔥 订阅已生效"
-
-
-
-    # show_dashboard_info "$secret" "$public_ip"
-    return 0
-  done
-}
-
-
-
-# =========================
-# 内核检查
-# =========================
-if ! resolve_clash_bin "$Install_Dir" "${CpuArch:-}" >/dev/null 2>&1; then
-  die_with_reason \
-    "Clash 内核未就绪" \
-    "二进制校验失败" \
-    "请检查下载结果或 CPU 架构是否匹配"
-fi
-
-# ui_ok "Clash 内核校验通过"
-
-# =========================
-# 安装 clashctl
-# =========================
-# ===== 安装 / 覆盖 clashctl 命令 =====
-
-OLD_CLASHCTL_PATH="$(command -v clashctl 2>/dev/null || true)"
-OLD_CLASHCTL_REAL=""
-if [ -n "$OLD_CLASHCTL_PATH" ]; then
-  OLD_CLASHCTL_REAL="$(readlink -f "$OLD_CLASHCTL_PATH" 2>/dev/null || true)"
-fi
-
-# 如果存在旧版本，打印提示
-if [ -n "$OLD_CLASHCTL_REAL" ] && [ "$OLD_CLASHCTL_REAL" != "$(readlink -f "$Install_Dir/clashctl")" ]; then
-  ui_warn "检测到旧版本 clashctl: $OLD_CLASHCTL_REAL"
-  ui_info "将覆盖为当前版本: $Install_Dir/clashctl"
-fi
-
-# 强制清理旧入口
-cleanup_legacy_clashctl() {
-  rm -f /usr/local/bin/clashctl 2>/dev/null || true
-  rm -f /usr/bin/clashctl 2>/dev/null || true
-
-  [ -f /root/clashctl ] && rm -f /root/clashctl 2>/dev/null || true
-  [ -f "$HOME/clashctl" ] && rm -f "$HOME/clashctl" 2>/dev/null || true
-
-  [ -d /root/clashctl ] && rm -rf /root/clashctl 2>/dev/null || true
-  [ -d "$HOME/clashctl" ] && rm -rf "$HOME/clashctl" 2>/dev/null || true
-}
-
-# ===== 安装/覆盖 clashctl 命令 =====
-cleanup_legacy_clashctl
-chmod +x "$Install_Dir/clashctl"
-ln -s "$Install_Dir/clashctl" /usr/local/bin/clashctl
-
-# 清理当前 shell 污染（关键）
-unset -f clashctl clashhelp clashlog clashmixin clashoff clashon clashproxy clashrestart clashsecret clashstatus clashsub clashtun clashui clashupgrade 2>/dev/null || true
-unalias clashctl 2>/dev/null || true
-hash -r
-
-# 校验
-NEW_REAL="$(readlink -f /usr/local/bin/clashctl 2>/dev/null || true)"
-EXPECT_REAL="$(readlink -f "$Install_Dir/clashctl" 2>/dev/null || true)"
-
-if [ "$NEW_REAL" != "$EXPECT_REAL" ]; then
-  ui_error "clashctl 安装失败" >&2
-  exit 1
-fi
-
-# 清理 shell 缓存（非常关键）
-hash -r
-
-# 强校验（防止假覆盖）
-NEW_CLASHCTL_REAL="$(readlink -f /usr/local/bin/clashctl 2>/dev/null || true)"
-EXPECTED_CLASHCTL_REAL="$(readlink -f "$Install_Dir/clashctl" 2>/dev/null || true)"
-
-if [ "$NEW_CLASHCTL_REAL" != "$EXPECTED_CLASHCTL_REAL" ]; then
-  ui_error "clashctl 安装失败：系统命令未指向当前安装目录" >&2
-  exit 1
-fi
-
-# ui_ok "clashctl 已更新: /usr/local/bin/clashctl → $EXPECTED_CLASHCTL_REAL"
-# ui_ok "clashctl: /usr/local/bin/clashctl"
-
-# =========================
-# 安装 proxy helper
-# =========================
-rm -f /etc/profile.d/clash-for-linux.sh >/dev/null 2>&1 || true
-rm -f /etc/profile.d/clash.sh >/dev/null 2>&1 || true
-rm -f /etc/profile.d/clashctl.sh >/dev/null 2>&1 || true
-
-# 写入 profile 文件（新终端自动清理污染）
-cat >/etc/profile.d/clash-for-linux.sh <<EOF
-# clash-for-linux 代理工具
-
-CLASH_INSTALL_DIR="${Install_Dir}"
-ENV_FILE="\${CLASH_INSTALL_DIR}/.env"
-
-if [ -f "\$ENV_FILE" ]; then
-  set +u
-  . "\$ENV_FILE" >/dev/null 2>&1 || true
-  set -u
-fi
-
-CLASH_LISTEN_IP="\${CLASH_LISTEN_IP:-127.0.0.1}"
-CLASH_HTTP_PORT="\${CLASH_HTTP_PORT:-7890}"
-CLASH_SOCKS_PORT="\${CLASH_SOCKS_PORT:-7891}"
-
-proxy_on() {
-  export http_proxy="http://\${CLASH_LISTEN_IP}:\${CLASH_HTTP_PORT}"
-  export https_proxy="http://\${CLASH_LISTEN_IP}:\${CLASH_HTTP_PORT}"
-  export HTTP_PROXY="http://\${CLASH_LISTEN_IP}:\${CLASH_HTTP_PORT}"
-  export HTTPS_PROXY="http://\${CLASH_LISTEN_IP}:\${CLASH_HTTP_PORT}"
-  export all_proxy="socks5://\${CLASH_LISTEN_IP}:\${CLASH_SOCKS_PORT}"
-  export ALL_PROXY="socks5://\${CLASH_LISTEN_IP}:\${CLASH_SOCKS_PORT}"
-  export no_proxy="127.0.0.1,localhost,::1"
-  export NO_PROXY="127.0.0.1,localhost,::1"
-  echo "[OK] Proxy enabled: http://\${CLASH_LISTEN_IP}:\${CLASH_HTTP_PORT}"
-}
-
-proxy_off() {
-  unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
-  unset all_proxy ALL_PROXY no_proxy NO_PROXY
-  echo "[OK] Proxy disabled"
-}
-
-proxy_status() {
-  echo "http_proxy=\${http_proxy:-<empty>}"
-  echo "https_proxy=\${https_proxy:-<empty>}"
-  echo "all_proxy=\${all_proxy:-<empty>}"
-  echo "CLASH_LISTEN_IP=\${CLASH_LISTEN_IP}"
-  echo "CLASH_HTTP_PORT=\${CLASH_HTTP_PORT}"
-  echo "CLASH_SOCKS_PORT=\${CLASH_SOCKS_PORT}"
-}
-EOF
-
-chmod 644 /etc/profile.d/clash-for-linux.sh
-
-# =========================
-# 安装 systemd
-# =========================
-if command -v systemctl >/dev/null 2>&1; then
-  CLASH_SERVICE_USER="$Service_User" CLASH_SERVICE_GROUP="$Service_Group" \
-    "$Install_Dir/scripts/install_systemd.sh" "$Install_Dir"
-
-  if [ "${CLASH_ENABLE_SERVICE:-true}" = "true" ]; then
-    systemctl enable "${Service_Name}.service" || true
+    echo "👉 下一步：clashctl doctor"
+    echo
+    exit 1
   fi
-else
-  ui_warn "未找到 systemd，回退到脚本模式"
 fi
 
-ui_ok "[3/3] 启动服务..."
-
-# =========================
-# 输出 + 订阅录入
-# =========================
-
-
-secret="$(read_env_value "CLASH_SECRET")"
-public_ip="$(get_public_ip)"
-echo
-show_dashboard_info "$secret" "$public_ip"
-
-show_install_usage
-
-prompt_and_apply_subscription
+print_install_summary

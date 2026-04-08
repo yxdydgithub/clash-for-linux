@@ -1,0 +1,198 @@
+#!/usr/bin/env bash
+
+_clashctl_real() {
+  if command -v clashctl-bin >/dev/null 2>&1; then
+    clashctl-bin "$@"
+    return $?
+  fi
+
+  command clashctl "$@"
+}
+
+_clash_alias_print_sep() {
+  echo
+}
+
+_clash_alias_proxy_on() {
+  eval "$(_clashctl_real proxy on)" || return $?
+}
+
+_clash_alias_proxy_off() {
+  eval "$(_clashctl_real proxy off)" || true
+}
+
+_clash_alias_proxy_show() {
+  _clashctl_real proxy show 2>/dev/null || true
+}
+
+_clash_alias_status_next() {
+  _clashctl_real status-next 2>/dev/null || echo "clashctl status"
+}
+
+_clash_alias_prepare_on() {
+  # 这里不直接自己做 regenerate / restart / fallback，
+  # 而是统一交给 clashctl on 主链处理，避免双执行链。
+  # shell 层只负责“闭环体验”，不抢 runtime / build 的职责。
+  return 0
+}
+
+_clash_alias_after_on() {
+  _clash_alias_proxy_on || return $?
+
+  _clash_alias_print_sep
+  _clash_alias_proxy_show
+
+  echo "👉 下一步：$(_clash_alias_status_next)"
+}
+
+_clash_alias_after_off() {
+  _clash_alias_print_sep
+  echo "🔴 已关闭代理环境"
+  echo "🧹 当前 Shell 代理变量已清理"
+  echo "👉 下一步：clashctl status"
+}
+
+_clash_alias_run_on() {
+  _clash_alias_prepare_on || return $?
+
+  _clashctl_real on "$@" || return $?
+
+  _clash_alias_after_on || return $?
+}
+
+_clash_alias_run_off() {
+  _clash_alias_proxy_off
+  _clashctl_real off "$@" || return $?
+}
+
+clashctl() {
+  case "${1:-}" in
+    on)
+      shift || true
+      _clash_alias_run_on "$@"
+      ;;
+    off)
+      shift || true
+      _clash_alias_run_off "$@"
+      ;;
+    proxy)
+      case "${2:-}" in
+        on)
+          _clash_alias_proxy_on || return $?
+          _clash_alias_print_sep
+          _clash_alias_proxy_show
+          ;;
+        off)
+          _clash_alias_proxy_off
+          _clash_alias_print_sep
+          echo "🧹 当前 Shell 代理变量已清理"
+          ;;
+        *)
+          _clashctl_real "$@"
+          ;;
+      esac
+      ;;
+    ui)
+      shift || true
+      # ui 前如果 runtime 已运行但当前 shell 没代理，不强制注入；
+      # 保持 UI 行为纯粹，只走原命令。
+      _clashctl_real ui "$@"
+      ;;
+    status)
+      shift || true
+      _clashctl_real status "$@"
+      ;;
+    *)
+      _clashctl_real "$@"
+      ;;
+  esac
+}
+
+# 快捷入口全部收敛到 clashctl 函数
+clashon() {
+  clashctl on "$@" || return $?
+}
+
+clashoff() {
+  clashctl off "$@" || return $?
+}
+
+clashproxy() {
+  case "${1:-show}" in
+    on)
+      clashctl proxy on
+      ;;
+    off)
+      clashctl proxy off
+      ;;
+    show|status)
+      clashctl proxy show
+      ;;
+    groups)
+      clashctl proxy groups
+      ;;
+    current)
+      shift || true
+      clashctl proxy current "$@"
+      ;;
+    nodes)
+      shift || true
+      clashctl proxy nodes "$@"
+      ;;
+    select)
+      shift || true
+      clashctl proxy select "$@"
+      ;;
+    *)
+      echo "🧭 用法：clashproxy [show|on|off|groups|current|nodes|select]"
+      echo "💡 主路径切节点请使用：clashselect 或 clashctl select"
+      return 2
+      ;;
+  esac
+}
+
+clashls() {
+  clashctl ls "$@"
+}
+
+clashselect() {
+  clashctl select "$@"
+}
+
+clashui() {
+  clashctl ui "$@"
+}
+
+clashsecret() {
+  clashctl secret "$@"
+}
+
+clashtun() {
+  clashctl tun "$@"
+}
+
+clashupgrade() {
+  clashctl upgrade "$@"
+}
+
+clashmixin() {
+  case "${1:-}" in
+    -e|--edit)
+      clashctl mixin edit
+      ;;
+    -c|--raw)
+      clashctl mixin raw
+      ;;
+    -r|--runtime)
+      clashctl mixin runtime
+      ;;
+    "")
+      clashctl mixin
+      ;;
+    *)
+      clashctl mixin "$@"
+      ;;
+  esac
+}
+
+# shell 被 source 时不自动执行任何代理动作
