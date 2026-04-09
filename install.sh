@@ -17,6 +17,7 @@ detect_install_scope "${1:-auto}"
 
 init_layout
 ensure_required_commands
+ensure_dashboard_deploy_prerequisites
 
 ui_download "正在准备安装依赖"
 resolve_runtime_kernel
@@ -30,6 +31,9 @@ mark_install_port_plan || true
 install_clashctl_entry
 install_shell_alias_entry
 install_runtime_entry
+install_local_dashboard_assets
+ensure_controller_secret >/dev/null
+set_shell_proxy_persist_enabled "false"
 
 ensure_subscription_bootstrap_for_install "default"
 prompt_subscription_if_needed

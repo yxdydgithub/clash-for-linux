@@ -182,7 +182,7 @@ mixed-port: 7890
 allow-lan: true
 mode: rule
 log-level: info
-external-controller: 127.0.0.1:9090
+external-controller: 0.0.0.0:9090
 secret: ""
 
 tun:
@@ -431,7 +431,8 @@ clear_subscription_cache() {
 
 normalize_runtime_config() {
   local file="$1"
-  local mixed_port controller tun_enable_value tun_stack_value dns_port_value
+  local mixed_port controller tun_enable_value tun_stack_value dns_port_value controller_secret_value
+  local dashboard_dir_value
   local resolved_ports
 
   [ -s "$file" ] || die "待规范化的配置文件不存在：$file"
@@ -444,15 +445,22 @@ normalize_runtime_config() {
   tun_enable_value="$(tun_enabled)"
   tun_stack_value="$(tun_stack)"
   dns_port_value="$CLASH_DNS_PORT_RESOLVED"
+  controller_secret_value="$(ensure_controller_secret)"
+  dashboard_dir_value="$(runtime_dashboard_dir)"
 
   mixed_port="$mixed_port" \
   controller="$controller" \
   tun_enable_value="$tun_enable_value" \
   tun_stack_value="$tun_stack_value" \
+  controller_secret_value="$controller_secret_value" \
+  dashboard_dir_value="$dashboard_dir_value" \
   dns_listen_value="0.0.0.0:${dns_port_value}" \
   "$(yq_bin)" eval -i '
     .["mixed-port"] = (env(mixed_port) | tonumber) |
     .["external-controller"] = env(controller) |
+    .secret = env(controller_secret_value) |
+    .["external-ui"] = env(dashboard_dir_value) |
+    .["external-ui-url"] = "/ui" |
     .["allow-lan"] = (.["allow-lan"] // true) |
     .mode = (.mode // "rule") |
     .["log-level"] = (.["log-level"] // "info") |
@@ -470,6 +478,49 @@ normalize_runtime_config() {
     .["proxy-groups"] = (.["proxy-groups"] // []) |
     .rules = (.rules // [])
   ' "$file"
+}
+
+generate_secure_secret() {
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -hex 24 2>/dev/null | head -n 1
+    return 0
+  fi
+
+  head -c 32 /dev/urandom 2>/dev/null | od -An -tx1 | tr -d ' \n'
+}
+
+is_valid_controller_secret() {
+  local value="${1:-}"
+  case "${value}" in
+    ""|null|NULL|undefined|UNDEFINED|\"\"|\'\')
+      return 1
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+}
+
+ensure_controller_secret() {
+  local value
+
+  value="${CLASH_CONTROLLER_SECRET:-}"
+  if ! is_valid_controller_secret "$value"; then
+    value="$(read_env_value "CLASH_CONTROLLER_SECRET" 2>/dev/null || true)"
+  fi
+
+  if ! is_valid_controller_secret "$value"; then
+    value="$(generate_secure_secret)"
+    [ -n "${value:-}" ] || die "无法生成控制器密钥"
+    write_env_value "CLASH_CONTROLLER_SECRET" "$value"
+  fi
+
+  echo "$value"
+}
+
+clear_controller_secret() {
+  unset_env_value "CLASH_CONTROLLER_SECRET" || true
+  unset CLASH_CONTROLLER_SECRET || true
 }
 
 first_available_proxy_name() {
@@ -1448,7 +1499,7 @@ resolve_runtime_ports() {
   local used_ports=""
 
   preferred_mixed="${MIXED_PORT:-7890}"
-  preferred_controller="${EXTERNAL_CONTROLLER:-127.0.0.1:9090}"
+  preferred_controller="${EXTERNAL_CONTROLLER:-0.0.0.0:9090}"
   preferred_dns="${CLASH_DNS_PORT:-1053}"
 
   is_valid_port_number "$preferred_mixed" || die "MIXED_PORT 不合法：$preferred_mixed"
@@ -1480,7 +1531,7 @@ mark_install_port_plan() {
   eval "$resolved"
 
   preferred_mixed="${MIXED_PORT:-7890}"
-  preferred_controller="${EXTERNAL_CONTROLLER:-127.0.0.1:9090}"
+  preferred_controller="${EXTERNAL_CONTROLLER:-0.0.0.0:9090}"
   preferred_dns="${CLASH_DNS_PORT:-1053}"
 
   if [ "$MIXED_PORT_RESOLVED" = "$preferred_mixed" ]; then

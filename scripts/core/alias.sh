@@ -9,6 +9,37 @@ _clashctl_real() {
   command clashctl "$@"
 }
 
+_clash_alias_project_dir() {
+  local self_dir
+  self_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+  echo "$self_dir"
+}
+
+_clash_alias_state_file() {
+  echo "$(_clash_alias_project_dir)/runtime/shell-proxy.env"
+}
+
+_clash_alias_set_persist_enabled() {
+  local enabled="$1"
+  local state_file
+  state_file="$(_clash_alias_state_file)"
+
+  mkdir -p "$(dirname "$state_file")"
+  cat > "$state_file" <<EOF
+SHELL_PROXY_PERSIST_ENABLED="${enabled}"
+SHELL_PROXY_PERSIST_TIME="$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || true)"
+EOF
+}
+
+_clash_alias_persist_enabled() {
+  local state_file enabled
+  state_file="$(_clash_alias_state_file)"
+  [ -f "$state_file" ] || return 1
+
+  enabled="$(sed -nE 's/^SHELL_PROXY_PERSIST_ENABLED=\"?([^\"\r\n]+)\"?$/\1/p' "$state_file" | head -n 1)"
+  [ "${enabled:-false}" = "true" ]
+}
+
 _clash_alias_print_sep() {
   echo
 }
@@ -37,6 +68,7 @@ _clash_alias_prepare_on() {
 }
 
 _clash_alias_after_on() {
+  _clash_alias_set_persist_enabled "true"
   _clash_alias_proxy_on || return $?
 
   _clash_alias_print_sep
@@ -46,9 +78,11 @@ _clash_alias_after_on() {
 }
 
 _clash_alias_after_off() {
+  _clash_alias_set_persist_enabled "false"
   _clash_alias_print_sep
   echo "🔴 已关闭代理环境"
   echo "🧹 当前 Shell 代理变量已清理"
+  echo "🧭 新终端默认代理：已关闭"
   echo "👉 下一步：clashctl status"
 }
 
@@ -62,7 +96,18 @@ _clash_alias_run_on() {
 
 _clash_alias_run_off() {
   _clash_alias_proxy_off
+  _clash_alias_set_persist_enabled "false"
   _clashctl_real off "$@" || return $?
+  _clash_alias_after_off
+}
+
+_clash_alias_auto_restore_proxy() {
+  [ "${CLASH_FOR_LINUX_PROXY_AUTO_RESTORED:-0}" = "1" ] && return 0
+  export CLASH_FOR_LINUX_PROXY_AUTO_RESTORED="1"
+
+  if _clash_alias_persist_enabled; then
+    _clash_alias_proxy_on >/dev/null 2>&1 || true
+  fi
 }
 
 clashctl() {
@@ -195,4 +240,6 @@ clashmixin() {
   esac
 }
 
-# shell 被 source 时不自动执行任何代理动作
+# shell 被 source 后做轻量恢复：
+# 若上次 clashon 持久化开启，则新终端自动恢复当前 shell 代理变量。
+_clash_alias_auto_restore_proxy

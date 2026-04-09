@@ -25,6 +25,8 @@ done
 source "$PROJECT_DIR/scripts/core/common.sh"
 # shellcheck source=scripts/core/runtime.sh
 source "$PROJECT_DIR/scripts/core/runtime.sh"
+# shellcheck source=scripts/core/config.sh
+source "$PROJECT_DIR/scripts/core/config.sh"
 # shellcheck source=scripts/init/systemd.sh
 source "$PROJECT_DIR/scripts/init/systemd.sh"
 # shellcheck source=scripts/init/systemd-user.sh
@@ -40,11 +42,13 @@ service_stop || true
 remove_runtime_entry || true
 remove_clashctl_entry || true
 remove_shell_alias_entry || true
+clear_shell_proxy_persist_state || true
 
 if [ "$PURGE_RUNTIME" = "true" ]; then
   rm -rf "$RUNTIME_DIR"
+  clear_controller_secret || true
   echo "🗑️ 已删除运行目录：$RUNTIME_DIR"
-  echo "🧩 保留内容：项目目录仍在"
+  echo "🧩 保留内容：项目目录仍在（已清理 controller secret）"
 elif [ "$DEV_RESET" = "true" ]; then
   cache_backup_dir="$(mktemp -d)"
   cache_restore_needed="false"
@@ -75,9 +79,10 @@ elif [ "$DEV_RESET" = "true" ]; then
   fi
 
   rm -rf "$cache_backup_dir" 2>/dev/null || true
+  clear_controller_secret || true
 
   echo "🧪 已清理安装状态：$RUNTIME_DIR"
-  echo "🧩 保留内容：subscriptions.yaml、下载缓存与项目目录仍在"
+  echo "🧩 保留内容：subscriptions.yaml、下载缓存与项目目录仍在（已清理 controller secret）"
 else
   echo "📦 已卸载安装入口，保留运行目录：$RUNTIME_DIR"
   echo "🧩 保留内容：runtime 数据仍在"
