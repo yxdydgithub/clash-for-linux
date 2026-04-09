@@ -4156,11 +4156,11 @@ cmd_add() {
   prepare
   ensure_add_use_prerequisites
 
-  [ -n "${1:-}" ] || die "用法：clashctl add <url> [clash|convert] [name]"
+  [ -n "${1:-}" ] || die "用法：clashctl add <url> [name]"
 
-  sub_name="${3:-default}"
+  sub_name="${2:-default}"
 
-  set_subscription "${1:-}" "${2:-clash}" "$sub_name"
+  set_subscription "${1:-}" "convert" "$sub_name"
   apply_runtime_change_after_config_mutation
   print_add_feedback "$sub_name"
 }
@@ -4666,8 +4666,8 @@ cmd_sub() {
       ;;
     set)
       shift || true
-      [ -n "${1:-}" ] || die "用法：clashctl sub set <url> [clash|convert] [name]（推荐使用：clashctl add <订阅链接>）"
-      set_subscription "${1:-}" "${2:-clash}" "${3:-default}"
+      [ -n "${1:-}" ] || die "用法：clashctl sub set <url> [name]（固定 convert，推荐使用：clashctl add <订阅链接>）"
+      set_subscription "${1:-}" "convert" "${2:-default}"
       apply_runtime_change_after_config_mutation
       ;;
     enable)
