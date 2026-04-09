@@ -408,13 +408,11 @@ status_build_active_sources() {
 
 status_build_failed_active_sources() {
   local value
-
   value="$(read_build_value "BUILD_FAILED_ACTIVE_SOURCES" 2>/dev/null || true)"
   if [ -n "${value:-}" ]; then
     echo "$value"
     return 0
   fi
-
   # 兼容历史 build.env
   read_build_value "BUILD_FAILED_SOURCES" 2>/dev/null || true
 }

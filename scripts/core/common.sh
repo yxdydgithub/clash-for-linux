@@ -281,11 +281,11 @@ normalize_env_compat() {
     CLASH_SUBSCRIPTION_UA="$CLASH_SUB_UA"
   fi
 
+
   # 旧默认值迁移：公网默认监听
   if [ "${EXTERNAL_CONTROLLER:-}" = "127.0.0.1:9090" ]; then
     EXTERNAL_CONTROLLER="0.0.0.0:9090"
   fi
-
   # 已废弃：active-only 主链不再消费该字段
   unset BUILD_MIN_SUCCESS_SOURCES 2>/dev/null || true
 
