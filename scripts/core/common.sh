@@ -1093,7 +1093,7 @@ clear_shell_proxy_persist_state() {
 }
 
 install_local_dashboard_assets() {
-  local archive source_dir target source_type
+  local archive source_dir target source_type nested_dir
   archive="$(dashboard_archive_file)"
   source_dir="$(dashboard_dir_file)"
   target="$(runtime_dashboard_dir)"
@@ -1124,6 +1124,20 @@ install_local_dashboard_assets() {
                 "请提供 resources/dashboard/dist/index.html 或可解压的 resources/dashboard/dist.zip"
       ;;
   esac
+
+  if [ ! -f "$target/index.html" ]; then
+    for nested_dir in dist dashboard; do
+      if [ -f "$target/$nested_dir/index.html" ]; then
+        cp -a "$target/$nested_dir"/. "$target"/ 2>/dev/null || {
+          write_runtime_value "DASHBOARD_ASSET_SOURCE" "$source_type"
+          write_runtime_value "DASHBOARD_DEPLOY_READY" "false"
+          die "Dashboard 扁平化失败：$target/$nested_dir"
+        }
+        rm -rf "$target/$nested_dir" 2>/dev/null || true
+        break
+      fi
+    done
+  fi
 
   if ! runtime_dashboard_ready; then
     write_runtime_value "DASHBOARD_ASSET_SOURCE" "$source_type"
