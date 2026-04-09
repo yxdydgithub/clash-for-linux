@@ -100,7 +100,7 @@ usage_advanced() {
 
 💡 Notes:
   当前编译链固定为 active-only
-  只处理当前主订阅，不再提供 merge / policy / select 编译集合
+  只处理当前 active 主订阅
   Tun 模式属于高级能力，开启前建议先执行：clashctl tun doctor
 EOF
 }
@@ -109,6 +109,23 @@ prepare() {
   init_project_context "$PROJECT_DIR"
   load_env_if_exists
   detect_install_scope auto
+}
+
+ensure_add_use_prerequisites() {
+  if [ ! -x "$(yq_bin)" ]; then
+    die_state "依赖未就绪：缺少 yq（$(yq_bin)）" \
+              "请先执行 bash install.sh，或运行 clashctl doctor 查看缺失项"
+  fi
+
+  if [ ! -d "$RUNTIME_DIR" ]; then
+    die_state "运行环境未初始化：缺少 runtime 目录" \
+              "请先执行 bash install.sh"
+  fi
+
+  if [ ! -d "$CONFIG_DIR" ]; then
+    die_state "运行环境未初始化：缺少 config 目录" \
+              "请先执行 bash install.sh"
+  fi
 }
 
 ensure_runtime_ports_ready() {
@@ -190,10 +207,12 @@ ensure_on_path_ready() {
 }
 
 print_on_feedback() {
-  local mixed_port controller next_action
+  local mixed_port controller controller_lan controller_public next_action
 
   mixed_port="$(status_read_mixed_port 2>/dev/null || true)"
   controller="$(status_read_controller 2>/dev/null || true)"
+  controller_lan="$(status_read_controller_lan 2>/dev/null || true)"
+  controller_public="$(status_read_controller_public 2>/dev/null || true)"
   load_system_state
   next_action="$(system_state_default_action 2>/dev/null || echo 'clashctl status')"
 
@@ -209,6 +228,12 @@ print_on_feedback() {
 
   if [ -n "${controller:-}" ] && [ "$controller" != "null" ]; then
     echo "🖥️ 控制台：http://${controller}/ui"
+    [ -n "${controller_lan:-}" ] && echo "🏠 局域网：http://${controller_lan}/ui"
+    if [ -n "${controller_public:-}" ]; then
+      echo "🌍 公网：http://${controller_public}/ui"
+    else
+      echo "🌍 公网：需公网 IP / 端口映射后可访问"
+    fi
   else
     echo "🖥️ 控制台：未知"
   fi
@@ -243,11 +268,18 @@ cmd_off() {
 }
 
 ui_internal_url() {
-  local controller
+  local controller host port
   controller="$(status_read_controller 2>/dev/null || true)"
 
   [ -n "${controller:-}" ] && [ "$controller" != "null" ] || return 1
-  echo "http://${controller}/ui"
+  host="${controller%:*}"
+  port="${controller##*:}"
+
+  if [ "${host:-}" = "0.0.0.0" ]; then
+    host="127.0.0.1"
+  fi
+
+  echo "http://${host}:${port}/ui"
 }
 
 ui_public_url() {
@@ -276,6 +308,7 @@ cmd_ui() {
   local controller_addr=""
   local internal_url="" lan_url="" public_url="" public_fixed_url=""
   local current_secret="" controller_port="" controller_status=""
+  local dashboard_source="" dashboard_ready_text=""
 
   prepare
   runtime_config_exists || die "🧩 运行时配置不存在，请先生成配置"
@@ -289,6 +322,16 @@ cmd_ui() {
   public_fixed_url="${CLASH_PUBLIC_UI_URL:-http://board.zash.run.place}"
   current_secret="$(controller_secret 2>/dev/null || true)"
   controller_port="$(ui_controller_port 2>/dev/null || true)"
+  dashboard_source="$(read_runtime_value "DASHBOARD_ASSET_SOURCE" 2>/dev/null || echo none)"
+  case "${dashboard_source:-none}" in
+    dir|zip|none) ;;
+    *) dashboard_source="none" ;;
+  esac
+  if runtime_dashboard_ready; then
+    dashboard_ready_text="有效"
+  else
+    dashboard_ready_text="无效"
+  fi
 
   if [ -z "${current_secret:-}" ] || [ "$current_secret" = "null" ]; then
     current_secret="未设置"
@@ -312,6 +355,12 @@ cmd_ui() {
     "$public_fixed_url" \
     "$current_secret" \
     "$controller_port"
+
+  ui_kv "🧩" "Dashboard 来源" "$dashboard_source"
+  ui_kv "🧩" "Dashboard 部署" "$dashboard_ready_text"
+  if [ "$dashboard_ready_text" != "有效" ]; then
+    ui_warn "本地 Dashboard 部署无效，请先修复 assets 后重试 install/update"
+  fi
 
   case "$controller_status" in
     可访问)
@@ -340,27 +389,33 @@ cmd_ui() {
   esac
 }
 
-status_build_mode() {
-  read_build_value "BUILD_MODE" 2>/dev/null || true
-}
-
 status_build_active_source() {
   read_build_value "BUILD_ACTIVE_SOURCE" 2>/dev/null || true
 }
 
-status_build_selected_sources() {
-  read_build_value "BUILD_SELECTED_SOURCES" 2>/dev/null || true
-}
+status_build_active_sources() {
+  local value
 
-status_build_included_sources() {
+  value="$(read_build_value "BUILD_ACTIVE_SOURCES" 2>/dev/null || true)"
+  if [ -n "${value:-}" ]; then
+    echo "$value"
+    return 0
+  fi
+
+  # 兼容历史 build.env
   read_build_value "BUILD_INCLUDED_SOURCES" 2>/dev/null || true
 }
 
-status_build_min_success_sources() {
-  read_build_value "BUILD_MIN_SUCCESS_SOURCES" 2>/dev/null || true
-}
+status_build_failed_active_sources() {
+  local value
 
-status_build_failed_sources() {
+  value="$(read_build_value "BUILD_FAILED_ACTIVE_SOURCES" 2>/dev/null || true)"
+  if [ -n "${value:-}" ]; then
+    echo "$value"
+    return 0
+  fi
+
+  # 兼容历史 build.env
   read_build_value "BUILD_FAILED_SOURCES" 2>/dev/null || true
 }
 
@@ -1664,9 +1719,9 @@ status_port_adjustment_brief() {
 }
 
 print_status_summary_compact() {
-  local profile mixed_port controller
-  local running_text user_connectivity user_risk current_proxy_brief next_action
-  local current_active
+  local profile mixed_port controller controller_lan controller_public
+  local running_text user_connectivity user_risk current_proxy_brief next_action shell_persist_text
+  local current_active dashboard_text dashboard_source_text dashboard_policy_text secret_text
   local tun_text
 
   profile="$(show_active_profile 2>/dev/null || true)"
@@ -1674,6 +1729,8 @@ print_status_summary_compact() {
 
   mixed_port="$(status_read_mixed_port 2>/dev/null || true)"
   controller="$(status_read_controller 2>/dev/null || true)"
+  controller_lan="$(status_read_controller_lan 2>/dev/null || true)"
+  controller_public="$(status_read_controller_public 2>/dev/null || true)"
   current_active="$(active_subscription_name 2>/dev/null || true)"
   tun_text="$(status_tun_effective_text)"
 
@@ -1687,6 +1744,31 @@ print_status_summary_compact() {
   user_risk="$(status_user_risk_text)"
   current_proxy_brief="$(status_current_proxy_brief)"
   next_action="$(system_state_default_action 2>/dev/null || echo 'clashctl status')"
+  if shell_proxy_persist_enabled 2>/dev/null; then
+    shell_persist_text="开启"
+  else
+    shell_persist_text="关闭"
+  fi
+  if [ -f "$(runtime_dashboard_dir)/index.html" ]; then
+    dashboard_text="已部署"
+  else
+    dashboard_text="未部署"
+  fi
+  dashboard_source_text="$(read_runtime_value "DASHBOARD_ASSET_SOURCE" 2>/dev/null || echo none)"
+  case "${dashboard_source_text:-none}" in
+    dir|zip|none) ;;
+    *) dashboard_source_text="none" ;;
+  esac
+  if [ "$dashboard_source_text" = "none" ]; then
+    dashboard_policy_text="默认策略：Dashboard 资产无效将阻断 install/update"
+  else
+    dashboard_policy_text="默认策略：Dashboard 资产需保持可部署"
+  fi
+  if [ -n "$(read_env_value "CLASH_CONTROLLER_SECRET" 2>/dev/null || true)" ]; then
+    secret_text="已设置"
+  else
+    secret_text="未设置"
+  fi
 
   echo
   echo "😼 Clash 状态总览"
@@ -1706,6 +1788,10 @@ print_status_summary_compact() {
   echo "⚙️ 运行后端：$(status_runtime_backend_text)"
   echo "🧪 环境模式：$(status_container_mode_text)"
   echo "🧪 Tun 状态：${tun_text:-未知}"
+  echo "🧭 新终端代理继承：${shell_persist_text}"
+  echo "🧩 Dashboard：${dashboard_text}（来源：${dashboard_source_text}）"
+  echo "🧩 Dashboard 策略：${dashboard_policy_text}"
+  echo "🔐 控制器密钥：${secret_text}"
 
   if [ -n "${mixed_port:-}" ] && [ "$mixed_port" != "null" ]; then
     echo "🌐 本地代理：http://127.0.0.1:${mixed_port}"
@@ -1715,6 +1801,12 @@ print_status_summary_compact() {
 
   if [ -n "${controller:-}" ] && [ "$controller" != "null" ]; then
     echo "🖥️ 控制台：http://${controller}/ui"
+    [ -n "${controller_lan:-}" ] && echo "🏠 局域网：http://${controller_lan}/ui"
+    if [ -n "${controller_public:-}" ]; then
+      echo "🌍 公网：http://${controller_public}/ui"
+    else
+      echo "🌍 公网：需公网 IP / 端口映射后可访问"
+    fi
   else
     echo "🖥️ 控制台：未知"
   fi
@@ -1726,8 +1818,8 @@ print_status_summary_compact() {
 }
 
 print_status_summary_verbose() {
-  local running_text profile mixed_port controller
-  local build_mode current_active build_included build_failed build_status build_time
+  local running_text profile mixed_port controller controller_lan controller_public
+  local current_active build_active_sources build_failed_active_sources build_status build_time
   local build_block_reason build_block_time
   local last_switch_from last_switch_to last_switch_time
   local controller_ok current_proxy_lines
@@ -1736,18 +1828,20 @@ print_status_summary_verbose() {
   local config_source config_source_time build_applied build_applied_time build_applied_reason
   local install_backend_text install_container_text install_verify_text port_adjustment_text
   local tun_enabled tun_effective tun_stack tun_container_text tun_kernel_text tun_verify_result tun_verify_reason tun_verify_time
+  local shell_persist_text dashboard_text dashboard_source_text dashboard_policy_text secret_text
 
   profile="$(show_active_profile 2>/dev/null || true)"
   [ -n "${profile:-}" ] || profile="default"
 
   mixed_port="$(status_read_mixed_port 2>/dev/null || true)"
   controller="$(status_read_controller 2>/dev/null || true)"
+  controller_lan="$(status_read_controller_lan 2>/dev/null || true)"
+  controller_public="$(status_read_controller_public 2>/dev/null || true)"
 
 
-  build_mode="$(status_build_mode)"
   current_active="$(active_subscription_name 2>/dev/null || true)"
-  build_included="$(status_build_included_sources)"
-  build_failed="$(status_build_failed_sources)"
+  build_active_sources="$(status_build_active_sources)"
+  build_failed_active_sources="$(status_build_failed_active_sources)"
   build_status="$(status_build_last_status)"
   build_time="$(status_build_last_time)"
 
@@ -1796,6 +1890,31 @@ print_status_summary_verbose() {
   tun_verify_result="$(status_tun_last_verify_result 2>/dev/null || true)"
   tun_verify_reason="$(status_tun_last_verify_reason 2>/dev/null || true)"
   tun_verify_time="$(status_tun_last_verify_time 2>/dev/null || true)"
+  if shell_proxy_persist_enabled 2>/dev/null; then
+    shell_persist_text="开启"
+  else
+    shell_persist_text="关闭"
+  fi
+  if [ -f "$(runtime_dashboard_dir)/index.html" ]; then
+    dashboard_text="已部署"
+  else
+    dashboard_text="未部署"
+  fi
+  dashboard_source_text="$(read_runtime_value "DASHBOARD_ASSET_SOURCE" 2>/dev/null || echo none)"
+  case "${dashboard_source_text:-none}" in
+    dir|zip|none) ;;
+    *) dashboard_source_text="none" ;;
+  esac
+  if [ "$dashboard_source_text" = "none" ]; then
+    dashboard_policy_text="默认策略：Dashboard 资产无效将阻断 install/update"
+  else
+    dashboard_policy_text="默认策略：Dashboard 资产需保持可部署"
+  fi
+  if [ -n "$(read_env_value "CLASH_CONTROLLER_SECRET" 2>/dev/null || true)" ]; then
+    secret_text="已设置"
+  else
+    secret_text="未设置"
+  fi
 
   echo
   echo "😼 Clash 状态总览"
@@ -1820,6 +1939,12 @@ print_status_summary_verbose() {
 
   if [ -n "${controller:-}" ] && [ "$controller" != "null" ]; then
     echo "🖥️ 控制台：http://${controller}/ui"
+    [ -n "${controller_lan:-}" ] && echo "🏠 局域网：http://${controller_lan}/ui"
+    if [ -n "${controller_public:-}" ]; then
+      echo "🌍 公网：http://${controller_public}/ui"
+    else
+      echo "🌍 公网：需公网 IP / 端口映射后可访问"
+    fi
   else
     echo "🖥️ 控制台：未知"
   fi
@@ -1831,10 +1956,14 @@ print_status_summary_verbose() {
   echo "🧪 环境模式：${install_container_text:-unknown}"
   echo "🧩 安装验证：${install_verify_text:-unknown}"
   echo "🧭 端口裁决：${port_adjustment_text:-unknown}"
+  echo "🧭 新终端代理继承：${shell_persist_text}"
+  echo "🧩 Dashboard：${dashboard_text}（来源：${dashboard_source_text}）"
+  echo "🧩 Dashboard 策略：${dashboard_policy_text}"
+  echo "🔐 控制器密钥：${secret_text}"
   echo
 
   if [ -n "$(install_plan_controller 2>/dev/null || true)" ]; then
-    echo "🖥️ 安装期控制器：$(install_plan_controller 2>/dev/null || true)"
+    echo "🖥️ 安装期控制器：$(display_controller_local_addr "$(install_plan_controller 2>/dev/null || true)" 2>/dev/null || install_plan_controller 2>/dev/null || true)"
   fi
 
   if [ -n "$(install_plan_mixed_port 2>/dev/null || true)" ]; then
@@ -1876,8 +2005,8 @@ print_status_summary_verbose() {
     echo "🧩 最近编译：未知"
   fi
 
-  [ -n "${build_included:-}" ] && echo "🟢 实际参与编译：$build_included"
-  [ -n "${build_failed:-}" ] && echo "❌ 编译失败源：$build_failed"
+  [ -n "${build_active_sources:-}" ] && echo "🟢 实际参与编译：$build_active_sources"
+  [ -n "${build_failed_active_sources:-}" ] && echo "❌ 编译失败源：$build_failed_active_sources"
   echo
 
   echo "【当前订阅健康】"
@@ -2109,6 +2238,16 @@ doctor_fail() {
   echo "  ✘ $1"
 }
 
+doctor_yq_available() {
+  local yq_path
+  yq_path="$(yq_bin 2>/dev/null || true)"
+  [ -n "${yq_path:-}" ] && [ -x "$yq_path" ]
+}
+
+doctor_warn_skip_yq_parse() {
+  doctor_warn "缺少 yq，跳过配置解析类检查"
+}
+
 doctor_install_context() {
   doctor_print_title "安装环境检查"
 
@@ -2229,15 +2368,46 @@ doctor_container_tun() {
 }
 
 doctor_dependencies() {
+  local dashboard_source
+
   doctor_print_title "依赖检查"
 
   [ -x "$(mihomo_bin)" ] && doctor_ok "Mihomo 已安装：$(mihomo_bin)" || doctor_fail "Mihomo 缺失：$(mihomo_bin)"
   [ -x "$(subconverter_bin)" ] && doctor_ok "subconverter 已安装：$(subconverter_bin)" || doctor_fail "subconverter 缺失：$(subconverter_bin)"
   [ -x "$(yq_bin)" ] && doctor_ok "yq 已安装：$(yq_bin)" || doctor_fail "yq 缺失：$(yq_bin)"
+
+  dashboard_source="$(dashboard_asset_source)"
+  case "$dashboard_source" in
+    dir)
+      doctor_ok "Dashboard 来源：dir（当前部署不依赖 unzip）"
+      ;;
+    zip)
+      if command -v unzip >/dev/null 2>&1; then
+        if dashboard_archive_valid; then
+          doctor_ok "Dashboard 来源：zip（unzip 可用，压缩包可解压）"
+        else
+          doctor_fail "Dashboard 来源：zip（压缩包损坏或不可解压，将阻断 install/update）"
+        fi
+      else
+        doctor_fail "Dashboard 来源：zip（缺少 unzip，无法部署，将阻断 install/update）"
+      fi
+      ;;
+    *)
+      doctor_warn "Dashboard 来源：none（dist/ 与 dist.zip 均不可用，将阻断 install/update）"
+      ;;
+  esac
+
+  if command -v openssl >/dev/null 2>&1; then
+    doctor_ok "Secret 生成：openssl 可用"
+  elif [ -r /dev/urandom ] && command -v od >/dev/null 2>&1 && command -v tr >/dev/null 2>&1 && command -v head >/dev/null 2>&1; then
+    doctor_ok "Secret 生成：fallback 可用（/dev/urandom + od/tr/head）"
+  else
+    doctor_fail "Secret 生成：缺少 openssl 且 fallback 不可用"
+  fi
 }
 
 doctor_config() {
-  local config_file active_profile mixed_port controller
+  local config_file active_profile mixed_port controller controller_secret_value external_ui_path dashboard_source
 
   doctor_print_title "配置检查"
 
@@ -2254,6 +2424,16 @@ doctor_config() {
   [ -n "${active_profile:-}" ] || active_profile="default"
   doctor_ok "当前 Profile：$active_profile"
 
+  if ! doctor_yq_available; then
+    doctor_warn_skip_yq_parse
+    if test_runtime_config "$config_file" >/dev/null 2>&1; then
+      doctor_ok "配置校验通过"
+    else
+      doctor_fail "配置校验失败"
+    fi
+    return 0
+  fi
+
   mixed_port="$("$(yq_bin)" eval '.["mixed-port"] // .port // ""' "$config_file" 2>/dev/null | head -n 1)"
   controller="$("$(yq_bin)" eval '.["external-controller"] // ""' "$config_file" 2>/dev/null | head -n 1)"
 
@@ -2264,9 +2444,28 @@ doctor_config() {
   fi
 
   if [ -n "${controller:-}" ] && [ "$controller" != "null" ]; then
-    doctor_ok "控制器地址：$controller"
+    doctor_ok "控制器地址：$(display_controller_local_addr "$controller" 2>/dev/null || echo "$controller")"
   else
     doctor_warn "未解析到控制器地址"
+  fi
+
+  controller_secret_value="$("$(yq_bin)" eval '.secret // ""' "$config_file" 2>/dev/null | head -n 1)"
+  if [ -n "${controller_secret_value:-}" ] && [ "$controller_secret_value" != "null" ]; then
+    doctor_ok "控制器密钥：已设置"
+  else
+    doctor_fail "控制器密钥：未设置"
+  fi
+
+  external_ui_path="$("$(yq_bin)" eval '.["external-ui"] // ""' "$config_file" 2>/dev/null | head -n 1)"
+  dashboard_source="$(read_runtime_value "DASHBOARD_ASSET_SOURCE" 2>/dev/null || echo none)"
+  case "${dashboard_source:-none}" in
+    dir|zip|none) ;;
+    *) dashboard_source="none" ;;
+  esac
+  if [ -n "${external_ui_path:-}" ] && [ "$external_ui_path" != "null" ] && [ -f "${external_ui_path%/}/index.html" ]; then
+    doctor_ok "Dashboard 已接入：${external_ui_path}（来源：${dashboard_source}）"
+  else
+    doctor_warn "Dashboard 未接入或目录无效（来源：${dashboard_source}）"
   fi
 
   if test_runtime_config "$config_file" >/dev/null 2>&1; then
@@ -2287,6 +2486,13 @@ doctor_subscription() {
     return 0
   fi
 
+  doctor_ok "订阅策略：active-only"
+
+  if ! doctor_yq_available; then
+    doctor_warn_skip_yq_parse
+    return 0
+  fi
+
   active="$(active_subscription_name 2>/dev/null || true)"
 
   total="$("$(yq_bin)" eval '.sources | keys | length' "$file" 2>/dev/null || echo 0)"
@@ -2303,7 +2509,6 @@ doctor_subscription() {
   )"
   auto_disabled_count="$(printf '%s\n' "${auto_disabled_count:-}" | awk 'NF{c++} END{print c+0}')"
 
-  doctor_ok "订阅策略：active-only"
   [ -n "${active:-}" ] && doctor_ok "当前主订阅：$active" || doctor_warn "当前主订阅为空"
 
   doctor_ok "订阅源总数：$total"
@@ -2325,15 +2530,15 @@ doctor_subscription() {
 }
 
 doctor_build() {
-  local active included failed last_status last_time
+  local active active_sources failed_active_sources last_status last_time
   local block_reason block_time
   local error_summary error_detail error_stage
 
   doctor_print_title "编译状态检查"
 
   active="$(read_build_value "BUILD_ACTIVE_SOURCE" 2>/dev/null || true)"
-  included="$(read_build_value "BUILD_INCLUDED_SOURCES" 2>/dev/null || true)"
-  failed="$(read_build_value "BUILD_FAILED_SOURCES" 2>/dev/null || true)"
+  active_sources="$(status_build_active_sources 2>/dev/null || true)"
+  failed_active_sources="$(status_build_failed_active_sources 2>/dev/null || true)"
   last_status="$(read_build_value "BUILD_LAST_STATUS" 2>/dev/null || true)"
   last_time="$(read_build_value "BUILD_LAST_TIME" 2>/dev/null || true)"
   error_summary="$(read_build_value "BUILD_LAST_ERROR_SUMMARY" 2>/dev/null || true)"
@@ -2342,7 +2547,7 @@ doctor_build() {
   block_reason="$(read_runtime_event_value "RUNTIME_LAST_BUILD_BLOCK_REASON" 2>/dev/null || true)"
   block_time="$(read_runtime_event_value "RUNTIME_LAST_BUILD_BLOCK_TIME" 2>/dev/null || true)"
 
-  if [ -z "${active:-}${included:-}${failed:-}${last_status:-}${last_time:-}${error_summary:-}${error_stage:-}${block_reason:-}" ]; then
+  if [ -z "${active:-}${active_sources:-}${failed_active_sources:-}${last_status:-}${last_time:-}${error_summary:-}${error_stage:-}${block_reason:-}" ]; then
     doctor_warn "未找到编译元数据（build.env）"
     return 0
   fi
@@ -2355,14 +2560,14 @@ doctor_build() {
     doctor_warn "当前主订阅为空"
   fi
 
-  if [ -n "${included:-}" ]; then
-    doctor_ok "实际参与编译：$included"
+  if [ -n "${active_sources:-}" ]; then
+    doctor_ok "实际参与编译：$active_sources"
   else
     doctor_warn "没有任何订阅参与编译"
   fi
 
-  if [ -n "${failed:-}" ]; then
-    doctor_warn "失败订阅源：$failed"
+  if [ -n "${failed_active_sources:-}" ]; then
+    doctor_warn "失败订阅源：$failed_active_sources"
   else
     doctor_ok "失败订阅源：无"
   fi
@@ -2462,6 +2667,18 @@ doctor_ports() {
     return 0
   fi
 
+  if ! doctor_yq_available; then
+    doctor_warn_skip_yq_parse
+    if [ -x "$(subconverter_bin)" ]; then
+      if is_port_in_use "$(subconverter_port)"; then
+        doctor_ok "subconverter 端口已监听：$(subconverter_port)"
+      else
+        doctor_warn "subconverter 端口未监听：$(subconverter_port)"
+      fi
+    fi
+    return 0
+  fi
+
   mixed_port="$("$(yq_bin)" eval '.["mixed-port"] // .port // ""' "$config_file" 2>/dev/null | head -n 1)"
   controller="$("$(yq_bin)" eval '.["external-controller"] // ""' "$config_file" 2>/dev/null | head -n 1)"
   controller_port="${controller##*:}"
@@ -2529,6 +2746,7 @@ doctor_install_ports() {
 doctor_runtime_events() {
   local fallback_used fallback_time fallback_reason risk_level
   local config_source build_applied build_applied_time build_applied_reason
+  local shell_persist_text dashboard_status dashboard_source secret_status
 
   doctor_print_title "运行事件检查"
 
@@ -2540,9 +2758,32 @@ doctor_runtime_events() {
   build_applied="$(status_runtime_build_applied 2>/dev/null || true)"
   build_applied_time="$(status_runtime_build_applied_time 2>/dev/null || true)"
   build_applied_reason="$(status_runtime_build_applied_reason 2>/dev/null || true)"
+  if shell_proxy_persist_enabled 2>/dev/null; then
+    shell_persist_text="开启"
+  else
+    shell_persist_text="关闭"
+  fi
+  if [ -f "$(runtime_dashboard_dir)/index.html" ]; then
+    dashboard_status="已部署"
+  else
+    dashboard_status="未部署"
+  fi
+  dashboard_source="$(read_runtime_value "DASHBOARD_ASSET_SOURCE" 2>/dev/null || echo none)"
+  case "${dashboard_source:-none}" in
+    dir|zip|none) ;;
+    *) dashboard_source="none" ;;
+  esac
+  if [ -n "$(read_env_value "CLASH_CONTROLLER_SECRET" 2>/dev/null || true)" ]; then
+    secret_status="已设置"
+  else
+    secret_status="未设置"
+  fi
 
   doctor_ok "当前风险等级：${risk_level:-unknown}"
   doctor_ok "当前配置来源：${config_source:-unknown}"
+  doctor_ok "新终端代理继承：${shell_persist_text}"
+  doctor_ok "Dashboard 运行目录：${dashboard_status}（来源：${dashboard_source}）"
+  doctor_ok ".env 控制器密钥：${secret_status}"
 
   case "${build_applied:-}" in
     true)
@@ -2648,7 +2889,7 @@ doctor_controller() {
     return 0
   fi
 
-  doctor_ok "控制器地址：$controller"
+  doctor_ok "控制器地址：$(display_controller_local_addr "$controller" 2>/dev/null || echo "$controller")"
 
   if ! status_is_running; then
     doctor_warn "内核未运行，无法检查控制器 API"
@@ -2798,7 +3039,7 @@ cmd_config() {
       echo
       echo "🧩 说明："
       echo "  当前编译链固定为 active-only"
-      echo "  只处理当前主订阅，不再提供 merge / policy / select 编译集合"
+      echo "  只处理当前 active 主订阅"
       echo
       ui_next "clashctl config show"
       ui_blank
@@ -3226,7 +3467,7 @@ doctor_evidence_lines() {
   fi
 
   if [ -n "${controller:-}" ] && [ "$controller" != "null" ]; then
-    echo "🔍 控制器地址：${controller}"
+    echo "🔍 控制器地址：$(display_controller_local_addr "$controller" 2>/dev/null || echo "$controller")"
   fi
 }
 
@@ -3240,6 +3481,8 @@ set_controller_secret() {
   SECRET_VALUE="$secret" "$(yq_bin)" eval -i '
     .secret = strenv(SECRET_VALUE)
   ' "$file"
+
+  write_env_value "CLASH_CONTROLLER_SECRET" "$secret"
 }
 
 cmd_secret() {
@@ -3841,6 +4084,7 @@ cmd_add() {
   local sub_name
 
   prepare
+  ensure_add_use_prerequisites
 
   [ -n "${1:-}" ] || die "用法：clashctl add <url> [clash|convert] [name]"
 
@@ -3855,6 +4099,7 @@ cmd_use() {
   local recommended active
 
   prepare
+  ensure_add_use_prerequisites
 
   case "${1:-}" in
     --recommend|-r)
@@ -4641,8 +4886,36 @@ status_read_mixed_port() {
   runtime_config_mixed_port 2>/dev/null || true
 }
 
-status_read_controller() {
+status_read_controller_raw() {
   runtime_config_controller_addr 2>/dev/null || true
+}
+
+status_read_controller() {
+  local controller
+  controller="$(status_read_controller_raw 2>/dev/null || true)"
+  display_controller_local_addr "$controller" 2>/dev/null || echo "$controller"
+}
+
+status_read_controller_lan() {
+  local controller lan_ip port
+  controller="$(status_read_controller_raw 2>/dev/null || true)"
+  [ -n "${controller:-}" ] && [ "$controller" != "null" ] || return 1
+
+  port="${controller##*:}"
+  lan_ip="$(ui_lan_ip 2>/dev/null || true)"
+  [ -n "${lan_ip:-}" ] || return 1
+  echo "${lan_ip}:${port}"
+}
+
+status_read_controller_public() {
+  local controller public_ip port
+  controller="$(status_read_controller_raw 2>/dev/null || true)"
+  [ -n "${controller:-}" ] && [ "$controller" != "null" ] || return 1
+
+  port="${controller##*:}"
+  public_ip="$(ui_public_ip 2>/dev/null || true)"
+  [ -n "${public_ip:-}" ] || return 1
+  echo "${public_ip}:${port}"
 }
 
 cmd="${1:-}"

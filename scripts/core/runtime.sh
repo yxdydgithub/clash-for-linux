@@ -44,10 +44,12 @@ resolve_yq() {
 }
 
 resolve_mihomo() {
-  local arch version file url tmp_file
+  local arch version file url tmp_file url_base custom_url
 
   arch="$(get_arch)"
   version="${MIHOMO_VERSION:-$DEFAULT_MIHOMO_VERSION}"
+  url_base="${MIHOMO_DOWNLOAD_BASE:-https://github.com/MetaCubeX/mihomo/releases/download}"
+  custom_url="${MIHOMO_DOWNLOAD_URL:-}"
 
   if [ -x "$(mihomo_bin)" ]; then
     return 0
@@ -60,10 +62,14 @@ resolve_mihomo() {
     *) die "暂不支持的 Mihomo 架构：$arch" ;;
   esac
 
-  url="https://github.com/MetaCubeX/mihomo/releases/download/${version}/${file}"
+  if [ -n "${custom_url:-}" ]; then
+    url="$custom_url"
+  else
+    url="${url_base%/}/${version}/${file}"
+  fi
   tmp_file="$(mktemp)"
 
-  download_file "$url" "$tmp_file" "mihomo"
+  download_file "$url" "$tmp_file" "mihomo（可在 .env 中设置 MIHOMO_DOWNLOAD_BASE / MIHOMO_DOWNLOAD_URL）"
   gzip -dc "$tmp_file" > "$(mihomo_bin)"
   chmod +x "$(mihomo_bin)"
   rm -f "$tmp_file"
@@ -373,8 +379,10 @@ clean_runtime_state() {
   stop_subconverter || true
   stop_runtime || true
   clear_build_meta || true
+  clear_runtime_event_file || true
 
   rm -f "$RUNTIME_DIR/config.yaml" 2>/dev/null || true
+  rm -f "$(runtime_meta_file)" 2>/dev/null || true
   rm -f "$RUNTIME_DIR"/*.pid 2>/dev/null || true
   rm -f "$RUNTIME_DIR"/*.lock 2>/dev/null || true
 
@@ -384,6 +392,8 @@ clean_runtime_state() {
   rm -rf "$RUNTIME_DIR/profiles" 2>/dev/null || true
   rm -rf "$RUNTIME_DIR/generated" 2>/dev/null || true
   rm -rf "$RUNTIME_DIR/tmp" 2>/dev/null || true
+  rm -rf "$(runtime_dashboard_dir)" 2>/dev/null || true
+  clear_shell_proxy_persist_state || true
 
   mkdir -p "$RUNTIME_DIR" "$BIN_DIR" "$LOG_DIR"
 }

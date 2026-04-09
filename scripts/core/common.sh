@@ -136,7 +136,7 @@ install_arch_text() {
 }
 
 install_state_text() {
-  local has_subscription install_ready runtime_ready controller_ready
+  local has_subscription install_ready runtime_ready controller_ready build_status
 
   if install_has_subscription; then
     has_subscription="true"
@@ -147,35 +147,43 @@ install_state_text() {
   install_ready="$(read_runtime_event_value "RUNTIME_LAST_INSTALL_READY" 2>/dev/null || true)"
   runtime_ready="$(install_verify_runtime_ready 2>/dev/null || true)"
   controller_ready="$(install_verify_controller_ready 2>/dev/null || true)"
-
-  if [ "${install_ready:-false}" = "true" ]; then
-    echo "ready"
-    return 0
-  fi
+  build_status="$(read_build_value "BUILD_LAST_STATUS" 2>/dev/null || true)"
 
   if [ "${has_subscription:-false}" != "true" ]; then
     echo "stopped"
     return 0
   fi
 
-  if [ "${runtime_ready:-false}" = "true" ] || [ "${controller_ready:-false}" = "true" ]; then
-    echo "degraded"
+  if [ "${build_status:-}" = "failed" ]; then
+    echo "broken"
     return 0
   fi
 
-  echo "degraded"
+  if [ "${install_ready:-false}" = "true" ] \
+    || { [ "${runtime_ready:-false}" = "true" ] && [ "${controller_ready:-false}" = "true" ]; }; then
+    echo "ready"
+    return 0
+  fi
+
+  echo "verifying"
 }
 
 install_build_result_text() {
-  local command_ready config_ready
+  local command_ready config_ready build_status
 
   command_ready="$(install_verify_command_ready 2>/dev/null || true)"
   config_ready="$(install_verify_config_ready 2>/dev/null || true)"
+  build_status="$(read_build_value "BUILD_LAST_STATUS" 2>/dev/null || true)"
 
-  if [ "${command_ready:-false}" = "true" ] && [ "${config_ready:-false}" = "true" ]; then
+  if [ "${build_status:-}" = "failed" ]; then
+    echo "failed"
+    return 0
+  fi
+
+  if [ "${command_ready:-false}" = "true" ] && { [ "${config_ready:-false}" = "true" ] || ! install_has_subscription; }; then
     echo "success"
   else
-    echo "failed"
+    echo "pending"
   fi
 }
 
@@ -184,7 +192,14 @@ install_next_step_text() {
     ready)
       echo "clashctl select"
       ;;
-    degraded)
+    verifying)
+      if install_has_subscription; then
+        echo "clashon"
+      else
+        echo "clashctl add <订阅链接>"
+      fi
+      ;;
+    broken)
       echo "clashctl doctor"
       ;;
     stopped)
@@ -219,6 +234,9 @@ init_project_context() {
 }
 
 load_env_if_exists() {
+  local env_file
+  env_file="$PROJECT_DIR/.env"
+
   if [ -f "$PROJECT_DIR/.env" ]; then
     set -a
     # shellcheck disable=SC1090
@@ -227,6 +245,7 @@ load_env_if_exists() {
   fi
 
   normalize_env_compat
+  cleanup_env_legacy_compat_fields "$env_file"
 }
 
 normalize_env_compat() {
@@ -262,7 +281,31 @@ normalize_env_compat() {
     CLASH_SUBSCRIPTION_UA="$CLASH_SUB_UA"
   fi
 
+  # 旧默认值迁移：公网默认监听
+  if [ "${EXTERNAL_CONTROLLER:-}" = "127.0.0.1:9090" ]; then
+    EXTERNAL_CONTROLLER="0.0.0.0:9090"
+  fi
+
+  # 已废弃：active-only 主链不再消费该字段
+  unset BUILD_MIN_SUCCESS_SOURCES 2>/dev/null || true
+
   return 0
+}
+
+cleanup_env_legacy_compat_fields() {
+  local file="$1"
+
+  [ -n "${file:-}" ] || return 0
+  [ -f "$file" ] || return 0
+
+  awk '
+    $0 ~ /^[[:space:]]*(export[[:space:]]+)?BUILD_MIN_SUCCESS_SOURCES=/ { next }
+    $0 ~ /^[[:space:]]*(export[[:space:]]+)?EXTERNAL_CONTROLLER="?127\.0\.0\.1:9090"?$/ {
+      print "export EXTERNAL_CONTROLLER=\"0.0.0.0:9090\""
+      next
+    }
+    { print }
+  ' "$file" > "${file}.tmp" && mv "${file}.tmp" "$file"
 }
 
 github_proxy_prefix() {
@@ -721,7 +764,8 @@ download_file() {
     fi
 
     rm -f "$fetch_tmp" 2>/dev/null || true
-    die "下载失败：${asset_name}"
+    die_state "下载失败：${asset_name}" \
+              "请检查网络连通性，或在 .env 中配置下载源后重试；也可先执行 clashctl doctor"
   fi
 
   ordered_entries="$(
@@ -781,7 +825,8 @@ EOF
   done
 
   rm -f "$fetch_tmp" 2>/dev/null || true
-  die "下载失败：${asset_name}"
+  die_state "下载失败：${asset_name}" \
+            "请检查网络连通性，或在 .env 中配置下载源后重试；也可先执行 clashctl doctor"
 }
 
 download_text_tmp_file() {
@@ -895,6 +940,7 @@ init_layout() {
     "$PROJECT_DIR/scripts/core" \
     "$PROJECT_DIR/scripts/init" \
     "$RUNTIME_DIR" \
+    "$RUNTIME_DIR/dashboard" \
     "$BIN_DIR" \
     "$LOG_DIR"
 
@@ -906,6 +952,150 @@ ensure_required_commands() {
   command -v tar >/dev/null 2>&1 || die "当前系统缺少 tar"
   command -v gzip >/dev/null 2>&1 || die "当前系统缺少 gzip"
   command -v readlink >/dev/null 2>&1 || die "当前系统缺少 readlink"
+}
+
+dashboard_archive_file() {
+  echo "$RESOURCE_DIR/dashboard/dist.zip"
+}
+
+dashboard_dir_file() {
+  echo "$RESOURCE_DIR/dashboard/dist"
+}
+
+runtime_dashboard_dir() {
+  echo "$RUNTIME_DIR/dashboard"
+}
+
+runtime_dashboard_ready() {
+  [ -f "$(runtime_dashboard_dir)/index.html" ]
+}
+
+dashboard_archive_valid() {
+  local archive
+  archive="$(dashboard_archive_file)"
+  [ -f "$archive" ] || return 1
+  unzip -tq "$archive" >/dev/null 2>&1
+}
+
+dashboard_dir_valid() {
+  local dir
+  dir="$(dashboard_dir_file)"
+  [ -d "$dir" ] || return 1
+  [ -f "$dir/index.html" ]
+}
+
+dashboard_asset_source() {
+  local archive
+  archive="$(dashboard_archive_file)"
+
+  if dashboard_dir_valid; then
+    echo "dir"
+    return 0
+  fi
+
+  if [ -f "$archive" ]; then
+    echo "zip"
+    return 0
+  fi
+
+  echo "none"
+}
+
+ensure_dashboard_deploy_prerequisites() {
+  local archive source_type
+  archive="$(dashboard_archive_file)"
+  source_type="$(dashboard_asset_source)"
+
+  case "$source_type" in
+    dir)
+      return 0
+      ;;
+    zip)
+      command -v unzip >/dev/null 2>&1 || die_state \
+        "检测到 Dashboard 仅可从 dist.zip 部署，但系统缺少 unzip" \
+        "请安装 unzip，或提供 resources/dashboard/dist/index.html（默认策略：本地 Dashboard 资产无效将阻断 install/update）"
+      dashboard_archive_valid || die_state \
+        "Dashboard 压缩包不可用：$archive" \
+        "请修复 dist.zip，或提供 resources/dashboard/dist/index.html（默认策略：本地 Dashboard 资产无效将阻断 install/update）"
+      return 0
+      ;;
+    *)
+      die_state "本地 Dashboard 资产不可用（dist/ 与 dist.zip 均无效）" \
+                "请提供 resources/dashboard/dist/index.html 或可解压的 resources/dashboard/dist.zip（默认策略：本地 Dashboard 资产无效将阻断 install/update）"
+      ;;
+  esac
+}
+
+shell_proxy_persist_state_file() {
+  echo "$RUNTIME_DIR/shell-proxy.env"
+}
+
+shell_proxy_persist_enabled() {
+  local file enabled
+  file="$(shell_proxy_persist_state_file)"
+  [ -f "$file" ] || return 1
+
+  enabled="$(sed -nE 's/^SHELL_PROXY_PERSIST_ENABLED=\"?([^\"\r\n]+)\"?$/\1/p' "$file" | head -n 1)"
+  [ "${enabled:-false}" = "true" ]
+}
+
+set_shell_proxy_persist_enabled() {
+  local enabled="${1:-false}"
+  local file
+  file="$(shell_proxy_persist_state_file)"
+
+  mkdir -p "$(dirname "$file")"
+  cat > "$file" <<EOF
+SHELL_PROXY_PERSIST_ENABLED="${enabled}"
+SHELL_PROXY_PERSIST_TIME="$(now_datetime)"
+EOF
+}
+
+clear_shell_proxy_persist_state() {
+  rm -f "$(shell_proxy_persist_state_file)" 2>/dev/null || true
+}
+
+install_local_dashboard_assets() {
+  local archive source_dir target source_type
+  archive="$(dashboard_archive_file)"
+  source_dir="$(dashboard_dir_file)"
+  target="$(runtime_dashboard_dir)"
+  source_type="$(dashboard_asset_source)"
+
+  rm -rf "$target" 2>/dev/null || true
+  mkdir -p "$target"
+
+  case "$source_type" in
+    dir)
+      cp -a "$source_dir"/. "$target"/ 2>/dev/null || {
+        write_runtime_value "DASHBOARD_ASSET_SOURCE" "dir"
+        write_runtime_value "DASHBOARD_DEPLOY_READY" "false"
+        die "复制 Dashboard 目录失败：$source_dir"
+      }
+      ;;
+    zip)
+      unzip -oq "$archive" -d "$target" || {
+        write_runtime_value "DASHBOARD_ASSET_SOURCE" "zip"
+        write_runtime_value "DASHBOARD_DEPLOY_READY" "false"
+        die "解压 Dashboard 失败：$archive"
+      }
+      ;;
+    *)
+      write_runtime_value "DASHBOARD_ASSET_SOURCE" "none"
+      write_runtime_value "DASHBOARD_DEPLOY_READY" "false"
+      die_state "本地 Dashboard 资产不可用（dist/ 与 dist.zip 均无效）" \
+                "请提供 resources/dashboard/dist/index.html 或可解压的 resources/dashboard/dist.zip"
+      ;;
+  esac
+
+  if ! runtime_dashboard_ready; then
+    write_runtime_value "DASHBOARD_ASSET_SOURCE" "$source_type"
+    write_runtime_value "DASHBOARD_DEPLOY_READY" "false"
+    die "Dashboard 部署不完整：缺少 $target/index.html"
+  fi
+
+  write_runtime_value "DASHBOARD_ASSET_SOURCE" "$source_type"
+  write_runtime_value "DASHBOARD_DEPLOY_READY" "true"
 }
 
 get_os() {
@@ -960,6 +1150,17 @@ read_env_value() {
   local file="$PROJECT_DIR/.env"
   [ -f "$file" ] || return 1
   sed -nE "s/^[[:space:]]*(export[[:space:]]+)?${key}=['\"]?([^'\"]*)['\"]?$/\2/p" "$file" | head -n 1
+}
+
+unset_env_value() {
+  local key="$1"
+  local file="$PROJECT_DIR/.env"
+  [ -f "$file" ] || return 0
+
+  awk -v k="$key" '
+    $0 ~ "^[[:space:]]*(export[[:space:]]+)?" k "=" { next }
+    { print }
+  ' "$file" > "${file}.tmp" && mv "${file}.tmp" "$file"
 }
 
 subscription_auto_update_enabled() {
@@ -1285,6 +1486,24 @@ runtime_config_controller_port() {
   [ "$addr" != "null" ] || return 1
 
   echo "${addr##*:}"
+}
+
+display_controller_local_addr() {
+  local controller="$1"
+  local host port
+
+  [ -n "${controller:-}" ] || return 1
+  [ "$controller" != "null" ] || return 1
+  printf '%s' "$controller" | grep -q ':' || return 1
+
+  host="${controller%:*}"
+  port="${controller##*:}"
+
+  if [ "$host" = "0.0.0.0" ]; then
+    host="127.0.0.1"
+  fi
+
+  echo "${host}:${port}"
 }
 
 runtime_config_dns_listen() {
@@ -2175,7 +2394,7 @@ remove_alias_command_wrappers() {
 }
 
 install_status_text() {
-  local has_subscription install_ready runtime_ready controller_ready
+  local has_subscription install_ready runtime_ready controller_ready build_status
   local live_runtime="false"
   local live_controller="false"
 
@@ -2188,6 +2407,7 @@ install_status_text() {
   install_ready="$(read_runtime_event_value "RUNTIME_LAST_INSTALL_READY" 2>/dev/null || true)"
   runtime_ready="$(install_verify_runtime_ready 2>/dev/null || true)"
   controller_ready="$(install_verify_controller_ready 2>/dev/null || true)"
+  build_status="$(read_build_value "BUILD_LAST_STATUS" 2>/dev/null || true)"
 
   if status_is_running 2>/dev/null; then
     live_runtime="true"
@@ -2199,6 +2419,11 @@ install_status_text() {
 
   if [ "${has_subscription:-false}" != "true" ]; then
     echo "stopped"
+    return 0
+  fi
+
+  if [ "${build_status:-}" = "failed" ]; then
+    echo "broken"
     return 0
   fi
 
@@ -2216,18 +2441,18 @@ install_status_text() {
   if [ "${live_runtime:-false}" = "true" ] \
     || [ "${runtime_ready:-false}" = "true" ] \
     || [ "${controller_ready:-false}" = "true" ]; then
-    echo "degraded"
+    echo "verifying"
     return 0
   fi
 
-  echo "degraded"
+  echo "verifying"
 }
 
 install_status_label() {
   case "$(install_status_text)" in
     ready) echo "ready" ;;
     stopped) echo "stopped" ;;
-    degraded) echo "degraded" ;;
+    verifying) echo "verifying" ;;
     broken) echo "broken" ;;
     *) echo "unknown" ;;
   esac
@@ -2245,7 +2470,14 @@ install_default_next_action() {
         echo "clashctl add <订阅链接>"
       fi
       ;;
-    degraded|broken)
+    verifying)
+      if status_is_running 2>/dev/null; then
+        echo "clashctl status"
+      else
+        echo "clashon"
+      fi
+      ;;
+    broken)
       if install_has_subscription; then
         echo "clashctl doctor"
       else
@@ -2259,7 +2491,7 @@ install_default_next_action() {
 }
 
 install_runtime_brief_line() {
-  local status_text mixed_port controller
+  local status_text mixed_port controller controller_display
 
   status_text="$(install_status_text)"
   mixed_port="$(install_plan_mixed_port 2>/dev/null || true)"
@@ -2267,23 +2499,25 @@ install_runtime_brief_line() {
 
   controller="$(install_plan_controller 2>/dev/null || true)"
   [ -n "${controller:-}" ] || controller="$(read_env_value "EXTERNAL_CONTROLLER" 2>/dev/null || echo "127.0.0.1:9090")"
+  controller_display="$(display_controller_local_addr "$controller" 2>/dev/null || true)"
 
   case "$status_text" in
     ready)
       echo "🟢 当前状态：ready"
       echo "🌐 本地代理：http://127.0.0.1:${mixed_port}"
-      echo "🖥️ 控制台：http://${controller}/ui"
+      echo "🖥️ 控制台：http://${controller_display:-$controller}/ui"
       ;;
     stopped)
       echo "🔴 当前状态：stopped"
       ;;
-    degraded)
-      echo "🟡 当前状态：degraded"
+    verifying)
+      echo "🟡 当前状态：verifying"
+      echo "🧭 正在确认运行状态，可继续观察或手动启动"
       if [ -n "${mixed_port:-}" ]; then
         echo "🌐 本地代理：http://127.0.0.1:${mixed_port}"
       fi
       if [ -n "${controller:-}" ]; then
-        echo "🖥️ 控制台：http://${controller}/ui"
+        echo "🖥️ 控制台：http://${controller_display:-$controller}/ui"
       fi
       ;;
     broken)
@@ -2296,7 +2530,7 @@ install_runtime_brief_line() {
 }
 
 print_install_summary() {
-  local backend mixed_port controller
+  local backend mixed_port controller controller_display
   local has_subscription final_state next_action
 
   backend="$(install_plan_backend 2>/dev/null || true)"
@@ -2307,6 +2541,7 @@ print_install_summary() {
 
   controller="$(install_plan_controller 2>/dev/null || true)"
   [ -n "${controller:-}" ] || controller="$(read_env_value "EXTERNAL_CONTROLLER" 2>/dev/null || echo "127.0.0.1:9090")"
+  controller_display="$(display_controller_local_addr "$controller" 2>/dev/null || true)"
 
   if install_has_subscription; then
     has_subscription="true"
@@ -2327,18 +2562,19 @@ print_install_summary() {
     ready)
       echo "🚦 当前状态：🟢 ready"
       echo "🌐 本地代理：http://127.0.0.1:${mixed_port}"
-      echo "🖥️ 控制台：http://${controller}/ui"
+      echo "🖥️ 控制台：http://${controller_display:-$controller}/ui"
       ;;
     stopped)
       echo "🚦 当前状态：⚪ stopped"
       ;;
-    degraded)
-      echo "🚦 当前状态：🟡 degraded"
+    verifying)
+      echo "🚦 当前状态：🟡 verifying"
+      echo "🧭 安装已完成，运行状态仍在确认中"
       if [ -n "${mixed_port:-}" ]; then
         echo "🌐 本地代理：http://127.0.0.1:${mixed_port}"
       fi
       if [ -n "${controller:-}" ]; then
-        echo "🖥️ 控制台：http://${controller}/ui"
+        echo "🖥️ 控制台：http://${controller_display:-$controller}/ui"
       fi
       ;;
     broken)
