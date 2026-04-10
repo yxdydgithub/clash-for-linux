@@ -74,15 +74,18 @@ _clash_alias_after_on() {
   _clash_alias_print_sep
   _clash_alias_proxy_show
 
+  if [ "${CLASH_WRAPPER_EXEC:-0}" = "1" ]; then
+    echo "⚠️ 当前通过独立命令执行，Shell 变量不会自动回写到父终端"
+    echo '💡 请在当前终端执行：eval "$(clashctl proxy on)"'
+  fi
+
   echo "👉 下一步：$(_clash_alias_status_next)"
 }
 
 _clash_alias_after_off() {
   _clash_alias_set_persist_enabled "false"
   _clash_alias_print_sep
-  echo "🔴 已关闭代理环境"
   echo "🧹 系统代理已关闭"
-  echo "👉 下一步：clashctl status"
 }
 
 _clash_alias_run_on() {

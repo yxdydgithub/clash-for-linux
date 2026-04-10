@@ -283,9 +283,7 @@ cmd_off() {
     die_state "当前环境不支持系统代理关闭（仅支持可写 /etc/environment）" "clashctl proxy show"
   fi
 
-  ui_title "🔴 代理环境已关闭"
-  ui_info "系统代理已关闭"
-  ui_next "clashctl status"
+  echo "🧹 系统代理已关闭"
   ui_blank
 }
 
