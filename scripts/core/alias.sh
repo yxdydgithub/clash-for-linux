@@ -154,10 +154,10 @@ _clash_alias_run_on() {
 
   _clash_alias_prepare_on || return $?
 
-  echo "🟢 正在开启代理..."
+  echo "🐱 正在开启代理..."
 
   on_output="$(mktemp "${TMPDIR:-/tmp}/clashon.XXXXXX")" || {
-    echo "🔴 开启代理失败：无法创建临时输出文件" >&2
+    echo "❗ 开启代理失败：无法创建临时输出文件" >&2
     return 1
   }
 
@@ -188,7 +188,7 @@ _clash_alias_run_on() {
         sed 's/^/  /' "$on_output" >&2
       fi
     else
-      echo "🔴 开启代理失败（底层返回码：$on_rc）" >&2
+      echo "❗ 开启代理失败（底层返回码：$on_rc）" >&2
       if [ -s "$on_output" ]; then
         sed 's/^/  /' "$on_output" >&2
       else
@@ -205,7 +205,7 @@ _clash_alias_run_on() {
 
   _clash_alias_after_on || {
     on_rc=$?
-    echo "🔴 开启代理失败：当前 Shell 代理环境同步失败（返回码：$on_rc）" >&2
+    echo "❗ 开启代理失败：当前 Shell 代理环境同步失败（返回码：$on_rc）" >&2
     return "$on_rc"
   }
 }

@@ -9,7 +9,7 @@
 : "${CONFIG_DIR:=}"
 : "${RESOURCE_DIR:=}"
 
-DEFAULT_MIHOMO_VERSION="${MIHOMO_VERSION:-v1.19.21}"
+DEFAULT_MIHOMO_VERSION="${MIHOMO_VERSION:-v1.19.23}"
 DEFAULT_CLASH_VERSION="${CLASH_VERSION:-v1.18.0}"
 DEFAULT_SUBCONVERTER_VERSION="${SUBCONVERTER_VERSION:-v0.9.0}"
 DEFAULT_YQ_VERSION="${YQ_VERSION:-v4.52.4}"
@@ -85,7 +85,7 @@ ui_section() {
 }
 
 ui_ok() {
-  printf '🟢 %s\n' "$*"
+  printf '🐱 %s\n' "$*"
 }
 
 ui_info() {
@@ -97,7 +97,7 @@ ui_warn() {
 }
 
 ui_error() {
-  printf '🔴 %s\n' "$*" >&2
+  printf '❗ %s\n' "$*" >&2
 }
 
 ui_next() {
@@ -2589,12 +2589,12 @@ install_runtime_brief_line() {
 
   case "$status_text" in
     ready)
-      echo "🟢 当前状态：ready"
+      echo "🐱 当前状态：ready"
       echo "🌐 本地代理：http://127.0.0.1:${mixed_port}"
       echo "💻 控制台：http://${controller_display:-$controller}/ui"
       ;;
     stopped)
-      echo "🔴 当前状态：stopped"
+      echo "❗ 当前状态：stopped"
       ;;
     verifying)
       echo "🟡 当前状态：verifying"
@@ -2607,7 +2607,7 @@ install_runtime_brief_line() {
       fi
       ;;
     broken)
-      echo "🔴 当前状态：broken"
+      echo "❗ 当前状态：broken"
       ;;
     *)
       echo "⚪ 当前状态：unknown"

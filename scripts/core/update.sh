@@ -55,6 +55,47 @@ remove_clash_binary() {
   rm -f "$(clash_bin)" 2>/dev/null || true
 }
 
+kernel_target_version() {
+  local kernel="$1"
+
+  case "$(normalize_kernel_type "$kernel")" in
+    mihomo)
+      echo "${MIHOMO_VERSION:-$DEFAULT_MIHOMO_VERSION}"
+      ;;
+    clash)
+      echo "${CLASH_VERSION:-$DEFAULT_CLASH_VERSION}"
+      ;;
+  esac
+}
+
+kernel_binary_path() {
+  local kernel="$1"
+
+  case "$(normalize_kernel_type "$kernel")" in
+    mihomo)
+      mihomo_bin
+      ;;
+    clash)
+      clash_bin
+      ;;
+  esac
+}
+
+kernel_installed_version_text() {
+  local kernel="$1"
+  local bin version_text
+
+  bin="$(kernel_binary_path "$kernel")"
+  if [ ! -x "$bin" ]; then
+    echo "未安装"
+    return 0
+  fi
+
+  version_text="$("$bin" -v 2>/dev/null | head -n 1 || true)"
+  [ -n "${version_text:-}" ] || version_text="未知"
+  echo "$version_text"
+}
+
 upgrade_runtime_kernel() {
   local target_kernel="${1:-}"
   local verbose="${2:-false}"
@@ -71,14 +112,7 @@ upgrade_runtime_kernel() {
   if [ "$verbose" = "true" ]; then
     info "当前架构：$(get_arch)"
     info "目标内核：$target_kernel"
-    case "$target_kernel" in
-      mihomo)
-        info "目标版本：${MIHOMO_VERSION:-$DEFAULT_MIHOMO_VERSION}"
-        ;;
-      clash)
-        info "目标版本：${CLASH_VERSION:-$DEFAULT_CLASH_VERSION}"
-        ;;
-    esac
+    info "目标版本：$(kernel_target_version "$target_kernel")"
   fi
 
   case "$target_kernel" in

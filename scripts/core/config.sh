@@ -859,7 +859,7 @@ print_subscription_health_one() {
 
   echo "📡 订阅名称：$name"
   echo "🔧 订阅类型：$type_text"
-  echo "🟢 启用状态：$enabled_text"
+  echo "🐱 启用状态：$enabled_text"
   echo "❤️ 健康状态：${status:-unknown}"
   echo "🚨 失败次数：${fail_count:-0}"
   [ -n "${last_success:-}" ] && echo "🕒 最近成功：$last_success"

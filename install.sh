@@ -47,7 +47,7 @@ if [ -n "$(subscription_url 2>/dev/null || true)" ]; then
     write_runtime_value "INSTALL_VERIFY_CONTROLLER_READY" "false"
 
     echo
-    echo "🔴 安装未完成：订阅编译失败"
+    echo "❗ 安装未完成：订阅编译失败"
     if [ -n "$(read_build_value "BUILD_LAST_ERROR_SUMMARY" 2>/dev/null || true)" ]; then
       echo "❌ 原因：$(read_build_value "BUILD_LAST_ERROR_SUMMARY" 2>/dev/null || true)"
     fi

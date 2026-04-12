@@ -88,4 +88,4 @@ else
   echo "🧩 保留内容：runtime 数据仍在"
 fi
 
-echo "🟢 卸载完成"
+echo "✨ 卸载完成"

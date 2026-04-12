@@ -1,25 +1,28 @@
 <h1 align="center">
-  🐧 Linux 一键安装 Clash</a>
+  🐱 Linux 一键安装 Clash</a>
   <br>
 </h1>
+
 
 <h3 align="center">
 一个面向 Linux 的 Clash(<a href="https://github.com/MetaCubeX/mihomo">Mihomo</a>)管理工具。
 </h3>
-
 <p align="center">
-  <img src="docs/assets/5.png" width="100%">
+  <img src="resources/ui.png" width="100%">
 </p>
+
 
 # ✨ 核心特性
 
-- 🚀 **自动识别系统架构**，自动下载并使用对应 Clash 内核
-- 🧪 **端口自动检测与分配**，避免冲突
-- 🔄 **多订阅管理（clashctl）**，支持自动订阅切换
-- 🧠 **Mixin 机制**，可按需追加/覆盖 Clash 配置
-- 🌐 **Tun 模式支持**（需 Clash Meta / Premium）
-- 🔐 **安全默认配置**，自动生成或自定义 Secret
-- 🩺 **内置诊断工具（`doctor`）**，快速排障 
+- 🚀 **自动识别系统架构：**自动下载并使用对应 Clash 内核
+- 🧪 **端口自动检测与分配：**避免冲突
+- 🔄 **多订阅管理：**可以保存多个订阅，通过 `clashctl use` 切换当前主订阅。
+- 💫 **节点选择：**使用编号交互选择策略组和节点。
+- 🌐 **Tun 模式：**用于透明代理接管场景。
+- 🧠 **Mixin 机制：**可按需追加/覆盖 Clash 配置
+- 👤 **不同权限：**兼容 `root` 与普通用户环境。
+- 🔐 **安全默认配置：**自动生成或自定义 Secret
+- 🩺 **内置诊断工具（`doctor`）：**快速排障 
 
 ### 适用场景
 
@@ -46,28 +49,29 @@ bash install.sh
 ## ⌨️ 命令一览
 
 ```bash
-用法:
-  clashctl 命令 [选项]
+〽️ 常用命令
+  clashon            🚀 开启代理
+  clashoff           ⛔ 关闭代理
+  clashctl select    💫 选择节点
+🕹️  控制台
+  clashui            🕹️  查看 Web 控制台
+  clashsecret        🔑 查看或设置 Web 密钥
+📦 订阅
+  clashctl add       ➕ 添加订阅
+  clashctl use       💱 切换订阅
+  clashctl ls        📡 查看订阅列表
+📌 高级
+  clashctl tun       🧪 Tun 模式管理
+  clashctl mixin     🧩 Mixin 配置管理
+  clashctl sub       🧩 订阅高级管理（启用 / 禁用 / 重命名 / 删除）
+  clashctl upgrade   🚀 升级当前或指定内核
+  clashctl update    🔄 更新项目代码
+📜 日志
+  clashctl doctor    🩺 诊断面板
+  clashctl log/logs  📜 查看日志
 
-指令:
-  on                     开启代理
-  off                    关闭代理
-  start                  启动 Clash
-  stop                   停止 Clash
-  restart                重启并自动应用当前配置
-  status                 查看当前状态
-  update                 更新到最新版本并自动应用配置
-  mode                   查看当前运行模式（systemd/script/none）
-  ui                     输出 Dashboard 地址
-  secret                 输出当前 secret
-  doctor                 健康检查
-  logs [-f] [-n 100]     查看日志
-  sub show|update        查看订阅地址 / 输入或更新订阅并立即生效
-  tun status|on|off      查看/启用/关闭 Tun
-  mixin status|on|off    查看/启用/关闭 Mixin
-
-选项:
-  -h, --help             显示帮助信息
+💡 显示更多帮助命令：clashctl -h
+💡 更多高级能力：clashctl help advanced
 ```
 
 ------
@@ -77,24 +81,27 @@ bash install.sh
 ```bash
 $ clashui
 ╔═══════════════════════════════════════════════╗
-║                🐱 Web 控制台                  ║
+║                🐱 Web 控制台                   ║
 ║═══════════════════════════════════════════════║
 ║                                               ║
-║     🔓 注意放行端口：9090                      ║
-║     🏠 内网：http://192.168.0.1:9090/ui       ║
-║     🌏 公网：http://8.8.8.8:9090/ui          ║
-║     ☁️ 公共：http://board.zash.run.place      ║
+║     🔓 注意放行端口：9090                       ║
+║     📶 状态：可访问                             ║
+║     🏠 内网：http://192.168.0.1:9090/ui        ║
+║     ☁️ 公共：http://board.zash.run.place       ║
+║     🌏 公网：http://8.8.8.8:9090/ui            ║
+║     🔑 密钥：dada289edb457b59                  ║
 ║                                               ║
 ╚═══════════════════════════════════════════════╝
 
-$ clashctl secret mysecret
+$ clashsecret mysecret
 🐱 密钥更新成功，已重启生效
 
-$ clashctl secret
+$ clashsecret
 🐱 当前密钥：mysecret
 ```
 
 - 可通过浏览器打开 `Web` 控制台进行可视化操作，例如切换节点、查看日志等。
+- `clashctl secret` 作为兼容入口继续保留，日常优先使用 `clashsecret`。
 - 默认使用 [zashboard](https://github.com/Zephyruso/zashboard) 作为控制台前端，如需更换可自行配置。
 - 若需将控制台暴露到公网，建议定期更换访问密钥，或通过 `SSH` 端口转发方式进行安全访问。
 
@@ -103,111 +110,188 @@ $ clashctl secret
 
 ## 🧰 常用管理命令
 
-统一管理入口（推荐使用）：
-
-```
-clashctl status
-clashctl start
-clashctl restart
-clashctl update
-clashctl set-url "https://example.com/your-subscribe"
-```
-
 ### 多订阅管理
 
 ```
-clashctl sub add office "https://example.com/office"
-clashctl sub add personal "https://example.com/personal"
+clashctl add <订阅链接> <名称>
+clashctl use
+clashctl ls
+clashctl sub
 clashctl sub list
-clashctl sub use personal
-clashctl sub update
-clashctl sub log
+clashctl sub enable <名称>
+clashctl sub disable <名称>
+clashctl sub rename <旧名称> <新名称>
+clashctl sub remove <名称>
 ```
 
 ------
 
-## 🏗️ 架构设计
+## 🏗️ 架构设计架构简述
 
-```text
-.env / 订阅
-      ↓
-generate（配置生成）
-      ↓
-runtime/config.yaml（运行态）
-      ↓
-Clash 内核运行（systemd / script）
-      ↓
-status / doctor（状态观测）
+项目当前可以按三层理解：
+
+### Control
+
+用户入口层。
+
+- `clashctl`
+- `clashon`
+- `clashoff`
+- `status`
+- `doctor`
+- `ui`
+- `select`
+
+Control 层负责把常用动作收口成可理解的命令和反馈。
+
+### Build
+
+配置生成层。
+
+- 多订阅保存
+- 单 active 主订阅
+- active-only 编译链
+- 订阅下载 / 转换 / 校验
+- `config/mixin.yaml` 运行补丁
+- 输出 `runtime/config.yaml`
+
+当前规则很明确：`generate_config` 只处理当前 active 主订阅。
+
+### Runtime
+
+实际运行层。
+
+- `runtime/` 是唯一运行时容器
+- 后端可以是 `systemd`、`systemd-user` 或 `script`
+- 运行配置是 `runtime/config.yaml`
+- 日志、状态、缓存和运行时产物都收敛到 runtime 体系
+
+## 配置说明
+
+### `.env`
+
+`.env` 用于覆盖安装和运行参数。常用项包括：
+
+```bash
+KERNEL_TYPE=mihomo
+MIXED_PORT=7890
+EXTERNAL_CONTROLLER=0.0.0.0:9090
+CLASH_CONTROLLER_SECRET=your-secret
+CLASH_SUBSCRIPTION_URL=https://example.com/sub
+MIHOMO_VERSION=latest
+CLASH_VERSION=latest
+YQ_VERSION=v4.44.3
+SUBCONVERTER_VERSION=v0.9.0
+MIHOMO_DOWNLOAD_BASE=https://github.com/MetaCubeX/mihomo/releases/download
+CLASH_DOWNLOAD_BASE=https://github.com/WindSpiritSR/clash/releases/download
 ```
 
-核心原则：
+按需设置即可，不需要每项都写。
 
-- 配置生成 ≠ 运行
-- 运行环境隔离
-- 状态必须可观测
+### `config/mixin.yaml`
+
+用于对最终运行配置做补丁：
+
+- `override` 覆盖字段
+- `prepend` 把数组项放到原始配置前面
+- `append` 把数组项放到原始配置后面
+
+查看当前模板：
+
+```bash
+clashctl mixin
+```
+
+编辑：
+
+```bash
+clashctl mixin edit
+```
+
+查看最终运行配置：
+
+```bash
+clashctl mixin runtime
+```
+
+### 
 
 ------
 
-## 🔄 配置修改与更新
+## 🔄 更新
 
-### 修改 Clash 配置并重启
-
-```
-vim runtime/config.yaml
-clashctl restart
-```
-
-> `restart` 不会更新订阅
-
-### 更新订阅
-
-```
+```bash
 clashctl update
+clashctl upgrade
+clashctl upgrade mihomo
+clashctl upgrade clash
 ```
 
-或指定订阅：
-
-```
-clashctl sub update personal
-```
+`update` 用于更新项目代码与运行依赖。`upgrade` 用于升级当前或指定代理内核。
 
 ------
 
-## 🧩 Mixin 配置（可选）
+## 🧩 Mixin 配置
 
-用于追加或覆盖 Clash 配置。
-
-- 默认读取：`config/mixin.d/*.yaml`（按文件名排序）
-- 也可在 `.env` 中指定：
-
+```bash
+clashctl mixin
+clashctl mixin edit
+clashctl mixin raw
+clashctl mixin runtime
 ```
-export CLASH_MIXIN_DIR='config/mixin.d'
-export CLASH_MIXIN_PATHS='config/mixin.d/base.yaml,config/mixin.d/rules.yaml'
+
+Mixin 是运行配置补丁，不是订阅管理。它通过 `config/mixin.yaml` 对当前 active 订阅生成的运行配置执行：
+
+- `override`
+- `prepend`
+- `append`
+
+示例：
+
+```yaml
+override:
+  dns:
+    enable: true
+
+prepend:
+  proxies: []
+  proxy-groups: []
+  rules:
+    - DOMAIN-SUFFIX,example.com,DIRECT
+
+append:
+  proxies: []
+  proxy-groups: []
+  rules:
+    - MATCH,节点选择
 ```
+
+编辑后执行：
+
+```bash
+clashctl mixin edit
+```
+
+它会重新生成配置；如果代理正在运行，会自动重启应用。
 
 ------
 
-## 🌐 Tun 模式（可选）
+## 🌐 Tun 模式
 
-需 Clash Meta / Premium 支持，在 `.env` 中配置：
-
-```
-export CLASH_TUN_ENABLE=true
-export CLASH_TUN_STACK=system
-export CLASH_TUN_AUTO_ROUTE=true
-export CLASH_TUN_AUTO_REDIRECT=false
-export CLASH_TUN_STRICT_ROUTE=false
-export CLASH_TUN_DNS_HIJACK='any:53'
+```bash
+clashctl tun on
+clashctl tun off
+clashctl tun doctor
+clashctl tun logs
 ```
 
-------
+Tun 用于透明接管链路。`tun on` 是动作反馈，展示当前关键配置和简短状态；完整证据请看：
 
-## ⛔ 停止服务
+```bash
+clashctl tun doctor
+```
 
-```
-clashctl stop
-proxy_off
-```
+Tun 判断不会简单把 `root` 等同于拥有 `CAP_NET_ADMIN`，也不会把 main table 默认路由未切换直接等同于 Tun 未生效。诊断会结合运行后端、容器环境、进程能力、Tun adapter、policy routing、路由表和日志证据。
 
 ------
 
@@ -216,38 +300,6 @@ proxy_off
 ```
 bash uninstall.sh
 ```
-
-
-
-## subconverter 多架构支持
-
-`subconverter` 用于将订阅内容转换为标准 clash 配置。默认会尝试以下位置：
-
-- `tools/subconverter/subconverter`
-- `tools/subconverter/subconverter-<arch>`
-- `tools/subconverter/bin/subconverter-<arch>`
-
-其中 `<arch>` 取值为：
-
-- `linux-amd64`
-- `linux-arm64`
-- `linux-armv7`
-
-自动下载默认使用 `https://github.com/tindy2013/subconverter/releases/latest/download/subconverter_{arch}.tar.gz`，
-如果需要自定义来源或关闭下载，可以设置：
-
-- `SUBCONVERTER_PATH`：指定自定义 `subconverter` 可执行文件路径。
-- `SUBCONVERTER_AUTO_DOWNLOAD=false`：关闭自动下载（默认会尝试自动下载，需 `curl`/`wget`）。
-- `SUBCONVERTER_DOWNLOAD_URL_TEMPLATE`：下载模板，使用 `{arch}` 占位符，如：
-
-```bash
-export SUBCONVERTER_AUTO_DOWNLOAD=true
-export SUBCONVERTER_DOWNLOAD_URL_TEMPLATE='https://example.com/subconverter_{arch}.tar.gz'
-```
-
-当 `subconverter` 不可用时会自动跳过转换，并提示警告。
-
-<br>
 
 ## 设置代理
 1. 开启 IP 转发
