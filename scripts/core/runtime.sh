@@ -487,7 +487,12 @@ start_runtime() {
   local config_file="$RUNTIME_DIR/config.yaml"
 
   resolve_runtime_kernel
+  if [ -s "$config_file" ]; then
+    ensure_mihomo_geodata_ready "$config_file" || die "因 GEOIP 依赖未就绪，当前配置无法启动：$config_file"
+  fi
+
   ensure_runtime_config_ready
+  ensure_mihomo_geodata_ready "$config_file" || die "因 GEOIP 依赖未就绪，当前配置无法启动：$config_file"
 
   if [ -f "$RUNTIME_DIR/mihomo.pid" ]; then
     local old_pid

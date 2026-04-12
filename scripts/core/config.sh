@@ -1237,12 +1237,117 @@ restore_last_known_good_config() {
   cp -f "$last_file" "$current_file"
 }
 
+mihomo_country_mmdb_file() {
+  echo "$RUNTIME_DIR/Country.mmdb"
+}
+
+mihomo_country_mmdb_url() {
+  local url
+
+  url="${MIHOMO_MMDB_DOWNLOAD_URL:-}"
+  [ -n "${url:-}" ] || url="${MIHOMO_MMDB_URL:-}"
+  [ -n "${url:-}" ] || url="$(read_env_value "MIHOMO_MMDB_DOWNLOAD_URL" 2>/dev/null || true)"
+  [ -n "${url:-}" ] || url="$(read_env_value "MIHOMO_MMDB_URL" 2>/dev/null || true)"
+  [ -n "${url:-}" ] || url="https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/country.mmdb"
+
+  echo "$url"
+}
+
+runtime_config_uses_geoip() {
+  local config_file="$1"
+
+  [ -s "$config_file" ] || return 1
+
+  if [ -x "$(yq_bin 2>/dev/null || true)" ]; then
+    if "$(yq_bin)" eval '(.rules // [])[] | tostring' "$config_file" 2>/dev/null \
+      | grep -Eiq '^GEOIP(,|:|$)'; then
+      return 0
+    fi
+  fi
+
+  grep -Eiq "^[[:space:]]*-[[:space:]]*['\"]?GEOIP([,:\"']|[[:space:]]*$)" "$config_file"
+}
+
+copy_existing_country_mmdb() {
+  local target="$1"
+  local candidate
+
+  for candidate in "$RUNTIME_DIR/country.mmdb"; do
+    [ -s "$candidate" ] || continue
+    mkdir -p "$(dirname "$target")"
+    cp -f "$candidate" "$target"
+    [ -s "$target" ] && return 0
+  done
+
+  [ -n "${RESOURCE_DIR:-}" ] || return 1
+
+  for candidate in "$RESOURCE_DIR/geo/Country.mmdb" "$RESOURCE_DIR/geo/country.mmdb"; do
+    [ -s "$candidate" ] || continue
+    mkdir -p "$(dirname "$target")"
+    cp -f "$candidate" "$target"
+    [ -s "$target" ] && return 0
+  done
+
+  return 1
+}
+
+ensure_mihomo_geodata_ready() {
+  local config_file="${1:-$RUNTIME_DIR/config.yaml}"
+  local target url tmp_file
+
+  [ "$(runtime_kernel_type)" = "mihomo" ] || return 0
+  runtime_config_uses_geoip "$config_file" || return 0
+
+  # Mihomo resolves Country.mmdb under the home directory passed by -d.
+  target="$(mihomo_country_mmdb_file)"
+  [ -s "$target" ] && return 0
+
+  if copy_existing_country_mmdb "$target"; then
+    success "Country.mmdb 已准备：$target"
+    return 0
+  fi
+
+  url="$(mihomo_country_mmdb_url)"
+
+  if download_cache_restore "$url" "$target"; then
+    success "Country.mmdb 已从缓存准备：$target"
+    return 0
+  fi
+
+  tmp_file="$(mktemp)"
+  rm -f "$tmp_file" 2>/dev/null || true
+
+  info "当前配置使用 GEOIP，正在准备 Country.mmdb：$target"
+  if ! ( download_file "$url" "$tmp_file" "Country.mmdb（GEOIP 依赖，可在 .env 中设置 MIHOMO_MMDB_URL / MIHOMO_MMDB_DOWNLOAD_URL）" ); then
+    rm -f "$tmp_file" 2>/dev/null || true
+    error "GEOIP 依赖未就绪：缺少 Country.mmdb，且 MMDB 下载失败"
+    error "当前配置无法启动：$config_file"
+    return 1
+  fi
+
+  if [ ! -s "$tmp_file" ]; then
+    rm -f "$tmp_file" 2>/dev/null || true
+    error "GEOIP 依赖未就绪：Country.mmdb 下载结果为空"
+    error "当前配置无法启动：$config_file"
+    return 1
+  fi
+
+  mkdir -p "$(dirname "$target")"
+  mv -f "$tmp_file" "$target"
+  success "Country.mmdb 已准备：$target"
+}
+
 test_runtime_config() {
   local config_file="${1:-$RUNTIME_DIR/config.yaml}"
 
   [ -s "$config_file" ] || die "配置文件不存在：$config_file"
 
-  "$(runtime_kernel_bin)" -t -f "$config_file" -d "$RUNTIME_DIR" >/dev/null
+  ensure_mihomo_geodata_ready "$config_file" || return 1
+
+  if ! "$(runtime_kernel_bin)" -t -f "$config_file" -d "$RUNTIME_DIR" >/dev/null; then
+    return 1
+  fi
+
   success "配置校验通过"
 }
 
