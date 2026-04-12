@@ -1,7 +1,8 @@
 <h1 align="center">
-  🐱 Linux 一键安装 Clash</a>
+  🐱 Clash for Linux</a>
   <br>
 </h1>
+
 
 
 <h3 align="center">
