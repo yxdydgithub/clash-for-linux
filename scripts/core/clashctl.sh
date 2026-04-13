@@ -213,6 +213,7 @@ print_on_feedback() {
 cmd_on() {
   local relay_switch
   local relay_switch_file relay_err_file relay_rc
+  local system_proxy_rc system_proxy_degraded="false"
   local already_on="false"
 
   trap 'rc=$?; ui_error "开启代理失败：cmd_on 在第 ${LINENO} 行执行失败：${BASH_COMMAND}（返回码：${rc}）"; ui_next "clashctl logs service"; exit "$rc"' ERR
@@ -260,16 +261,32 @@ cmd_on() {
     rm -f "$relay_switch_file" 2>/dev/null || true
   fi
 
-  if ! system_proxy_enable; then
-    service_stop >/dev/null 2>&1 || true
-    die_state "当前环境不支持系统代理接管（仅支持可写 /etc/environment）" "clashctl doctor"
+  if system_proxy_enable; then
+    system_proxy_degraded="false"
+  else
+    system_proxy_rc=$?
+    system_proxy_degraded="true"
+    write_runtime_value "RUNTIME_BOOT_PROXY_KEEP" "false" 2>/dev/null || true
+
+    if [ "$system_proxy_rc" -eq 2 ]; then
+      ui_warn "当前环境不支持系统代理持久接管，仅当前 Shell 生效"
+      ui_next "开机代理保持不可用；如需持久接管，请使用可写的 $(system_proxy_env_file)"
+    else
+      ui_warn "系统代理持久接管写入失败，仅当前 Shell 生效"
+      ui_next "clashctl doctor"
+    fi
+    ui_blank
   fi
 
   load_system_state
   print_on_feedback
 
   if [ "${CLASH_ALIAS_CALL:-0}" != "1" ]; then
-    ui_warn "当前通过 clashctl 子进程执行，已开启系统代理，但不会修改当前 Shell 代理变量"
+    if [ "$system_proxy_degraded" = "true" ]; then
+      ui_warn "当前通过 clashctl 子进程执行，不能修改当前 Shell 代理变量"
+    else
+      ui_warn "当前通过 clashctl 子进程执行，已开启系统代理，但不会修改当前 Shell 代理变量"
+    fi
     ui_next "需要当前 Shell 立即生效：source shell 入口后执行 clashon，或重新打开终端"
     ui_blank
   fi
@@ -285,11 +302,22 @@ cmd_on() {
 }
 
 cmd_off() {
+  local system_proxy_rc
+
   prepare
   service_stop
 
-  if ! system_proxy_disable; then
-    die_state "当前环境不支持系统代理关闭（仅支持可写 /etc/environment）" "clashctl doctor"
+  if system_proxy_disable; then
+    :
+  else
+    system_proxy_rc=$?
+    write_runtime_value "RUNTIME_BOOT_PROXY_KEEP" "false" 2>/dev/null || true
+    if [ "$system_proxy_rc" -eq 2 ]; then
+      ui_warn "当前环境不支持清理系统代理持久块，已继续关闭运行时"
+    else
+      ui_warn "系统代理持久块清理失败，已继续关闭运行时"
+      ui_next "clashctl doctor"
+    fi
   fi
   ui_blank
   echo "🧹 系统代理已关闭"

@@ -46,6 +46,14 @@ _clash_alias_state_file() {
   echo "$(_clash_alias_project_dir)/runtime/shell-proxy.env"
 }
 
+_clash_alias_runtime_config_file() {
+  echo "$(_clash_alias_project_dir)/runtime/config.yaml"
+}
+
+_clash_alias_yq_bin() {
+  echo "$(_clash_alias_project_dir)/runtime/bin/yq"
+}
+
 _clash_alias_set_persist_enabled() {
   local enabled="$1"
   local state_file
@@ -72,6 +80,11 @@ _clash_alias_print_sep() {
 }
 
 _clash_alias_proxy_on() {
+  _clashctl_real proxy on >/dev/null || return $?
+  _clash_alias_export_proxy || return $?
+}
+
+_clash_alias_proxy_on_system() {
   _clashctl_real proxy on >/dev/null || return $?
   _clash_alias_export_system_proxy || return $?
 }
@@ -102,6 +115,44 @@ _clash_alias_export_system_proxy() {
   [ -n "${all_url:-}" ] || all_url="${http_url/http:\/\//socks5://}"
   [ -n "${no_proxy:-}" ] || no_proxy="127.0.0.1,localhost,::1"
 
+  _clash_alias_export_proxy_values "$http_url" "$https_url" "$all_url" "$no_proxy"
+}
+
+_clash_alias_runtime_proxy_port() {
+  local config_file yq_bin port
+
+  config_file="$(_clash_alias_runtime_config_file)"
+  [ -s "$config_file" ] || return 1
+
+  yq_bin="$(_clash_alias_yq_bin)"
+  if [ -x "$yq_bin" ]; then
+    port="$("$yq_bin" eval '.["mixed-port"] // .port // ""' "$config_file" 2>/dev/null | head -n 1)"
+  else
+    port="$(sed -nE 's/^[[:space:]]*(mixed-port|port):[[:space:]]*"?([0-9]+)"?[[:space:]]*$/\2/p' "$config_file" | head -n 1)"
+  fi
+
+  [ -n "${port:-}" ] && [ "$port" != "null" ] || return 1
+  echo "$port"
+}
+
+_clash_alias_export_runtime_proxy() {
+  local port host http_url all_url no_proxy
+
+  port="$(_clash_alias_runtime_proxy_port)" || return $?
+  host="${CLASH_PROXY_HOST:-127.0.0.1}"
+  http_url="http://${host}:${port}"
+  all_url="socks5://${host}:${port}"
+  no_proxy="${NO_PROXY_DEFAULT:-127.0.0.1,localhost,::1}"
+
+  _clash_alias_export_proxy_values "$http_url" "$http_url" "$all_url" "$no_proxy"
+}
+
+_clash_alias_export_proxy_values() {
+  local http_url="$1"
+  local https_url="$2"
+  local all_url="$3"
+  local no_proxy="$4"
+
   export http_proxy="$http_url"
   export https_proxy="$https_url"
   export HTTP_PROXY="$http_url"
@@ -110,6 +161,10 @@ _clash_alias_export_system_proxy() {
   export ALL_PROXY="$all_url"
   export no_proxy="$no_proxy"
   export NO_PROXY="$no_proxy"
+}
+
+_clash_alias_export_proxy() {
+  _clash_alias_export_system_proxy || _clash_alias_export_runtime_proxy
 }
 
 _clash_alias_unset_shell_proxy() {
@@ -131,7 +186,7 @@ _clash_alias_prepare_on() {
 
 _clash_alias_after_on() {
   _clash_alias_set_persist_enabled "true"
-  _clash_alias_export_system_proxy || return $?
+  _clash_alias_export_proxy || return $?
 }
 
 _clash_alias_run_on() {
@@ -165,7 +220,7 @@ _clash_alias_run_on() {
       if [ -s "$on_output" ]; then
         sed 's/^/  /' "$on_output" >&2
       fi
-    elif _clash_alias_proxy_on; then
+    elif _clash_alias_proxy_on_system; then
       echo "🚨 clashctl on 返回非 0，已通过 proxy on 继续同步当前 Shell（底层返回码：$on_rc）" >&2
       if [ -s "$on_output" ]; then
         sed 's/^/  /' "$on_output" >&2
@@ -201,7 +256,7 @@ _clash_alias_run_off() {
 
 _clash_alias_auto_restore_proxy() {
   _clash_alias_persist_enabled || return 0
-  _clash_alias_export_system_proxy || return 0
+  _clash_alias_export_proxy || return 0
 
   echo "♻️ 已恢复当前 shell 代理环境（来自持久化状态）"
   return 0

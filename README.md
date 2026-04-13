@@ -157,6 +157,8 @@ clashctl sub rename <旧名称> <新名称>
 clashctl sub remove <名称>
 ```
 
+WSL / 普通用户如果无权写入 `/etc/environment`，`clashon` 会自动降级：运行时照常启动，当前 Shell 代理变量生效；系统代理持久接管和开机代理保持不可用。
+
 ### 本地订阅
 
 可以先手动下载 Clash 格式的订阅 YAML 文件到本地，再通过 `file://` 添加：
