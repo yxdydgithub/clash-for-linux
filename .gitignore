@@ -2,16 +2,17 @@
 .idea/
 .vscode/
 
-# Runtime config
-config.yaml
-config.yaml.*
+# Local env
+.env
 
-# Build / runtime artifacts
-resources/dist/
-resources/zip/*
+# Runtime
+runtime/
 
-# 保留 dist.zip
-!resources/zip/dist.zip
+# Local dashboard unpacked files
+resources/dashboard/dist/
 
-# 临时脚本
+# Keep packaged dashboard asset
+!resources/dashboard/dist.zip
+
+# Local test scripts
 test.sh

@@ -57,7 +57,7 @@ clear_build_error_detail() {
 }
 
 subscriptions_file() {
-  echo "$CONFIG_DIR/subscriptions.yaml"
+  echo "$RUNTIME_DIR/subscriptions.yaml"
 }
 
 migrate_subscriptions_legacy_fields() {
@@ -81,15 +81,25 @@ migrate_subscriptions_legacy_fields() {
 }
 
 ensure_subscriptions_file() {
-  local file
+  local file legacy_file
   file="$(subscriptions_file)"
+  legacy_file="$CONFIG_DIR/subscriptions.yaml"
 
   if [ -f "$file" ]; then
     migrate_subscriptions_legacy_fields "$file"
     return 0
   fi
 
-  mkdir -p "$CONFIG_DIR"
+  mkdir -p "$RUNTIME_DIR"
+
+  if [ -f "$legacy_file" ]; then
+    mv -f "$legacy_file" "$file" 2>/dev/null || {
+      cp -f "$legacy_file" "$file"
+      rm -f "$legacy_file" 2>/dev/null || true
+    }
+    migrate_subscriptions_legacy_fields "$file"
+    return 0
+  fi
 
   cat > "$file" <<'EOF'
 active: default

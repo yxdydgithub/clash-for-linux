@@ -197,6 +197,7 @@ Control 层负责把常用动作收口成可理解的命令和反馈。
 - `runtime/` 是唯一运行时容器
 - 后端可以是 `systemd`、`systemd-user` 或 `script`
 - 运行配置是 `runtime/config.yaml`
+- 订阅集合状态是 `runtime/subscriptions.yaml`（历史 `config/subscriptions.yaml` 仅用于兼容迁移）
 - 日志、状态、缓存和运行时产物都收敛到 runtime 体系
 
 ## 配置说明

@@ -60,8 +60,8 @@ elif [ "$DEV_RESET" = "true" ]; then
     cache_restore_needed="true"
   fi
 
-  if [ -f "$CONFIG_DIR/subscriptions.yaml" ]; then
-    cp -f "$CONFIG_DIR/subscriptions.yaml" "$subscriptions_backup_file" 2>/dev/null || true
+  if [ -f "$RUNTIME_DIR/subscriptions.yaml" ]; then
+    cp -f "$RUNTIME_DIR/subscriptions.yaml" "$subscriptions_backup_file" 2>/dev/null || true
     subscriptions_restore_needed="true"
   fi
 
@@ -74,8 +74,8 @@ elif [ "$DEV_RESET" = "true" ]; then
   fi
 
   if [ "$subscriptions_restore_needed" = "true" ] && [ -f "$subscriptions_backup_file" ]; then
-    mkdir -p "$CONFIG_DIR"
-    cp -f "$subscriptions_backup_file" "$CONFIG_DIR/subscriptions.yaml"
+    mkdir -p "$RUNTIME_DIR"
+    cp -f "$subscriptions_backup_file" "$RUNTIME_DIR/subscriptions.yaml"
   fi
 
   rm -rf "$cache_backup_dir" 2>/dev/null || true
