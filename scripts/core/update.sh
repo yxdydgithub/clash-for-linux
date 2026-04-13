@@ -34,6 +34,37 @@ git_has_local_changes() {
   [ -n "$(git -C "$PROJECT_DIR" status --porcelain --untracked-files=no 2>/dev/null)" ]
 }
 
+git_has_changes_except_legacy_subscriptions() {
+  git -C "$PROJECT_DIR" status --porcelain --untracked-files=no 2>/dev/null \
+    | awk '{
+        path=substr($0,4)
+        if (path != "config/subscriptions.yaml") {
+          found=1
+        }
+      }
+      END { exit(found?0:1) }'
+}
+
+handle_legacy_subscriptions_dirty_for_update() {
+  local legacy_file runtime_file
+  legacy_file="$CONFIG_DIR/subscriptions.yaml"
+  runtime_file="$(subscriptions_file)"
+
+  git_has_local_changes || return 1
+  git_has_changes_except_legacy_subscriptions && return 1
+
+  info "检测到历史路径 config/subscriptions.yaml 的本地改动，正在执行迁移兜底"
+
+  if [ -f "$legacy_file" ] && [ ! -f "$runtime_file" ]; then
+    mkdir -p "$RUNTIME_DIR"
+    cp -f "$legacy_file" "$runtime_file" 2>/dev/null || true
+    migrate_subscriptions_legacy_fields "$runtime_file"
+  fi
+
+  git -C "$PROJECT_DIR" checkout -- config/subscriptions.yaml >/dev/null 2>&1 || true
+  return 0
+}
+
 git_remote_name() {
   echo "${CLASH_GIT_REMOTE:-origin}"
 }
@@ -166,6 +197,10 @@ update_project_code() {
 
   info "远程仓库：$remote_name"
   info "更新分支：$branch"
+
+  if [ "$force_mode" != "true" ]; then
+    handle_legacy_subscriptions_dirty_for_update || true
+  fi
 
   if git_has_local_changes && [ "$force_mode" != "true" ]; then
     die "检测到本地有未提交改动，请先提交，或使用 clashctl update --force"

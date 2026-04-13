@@ -1,7 +1,0 @@
-active: default
-
-sources:
-  default:
-    type: clash
-    url: ""
-    enabled: true
