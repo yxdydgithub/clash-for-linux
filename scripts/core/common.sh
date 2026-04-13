@@ -812,12 +812,7 @@ download_candidate_probe() {
 download_candidate_fetch() {
   local url="$1"
   local out="$2"
-  local asset_name="${3:-}"
   local progress_arg="--progress-bar"
-
-  if [ "$asset_name" = "subscription" ]; then
-    progress_arg="--silent"
-  fi
 
   curl_download \
     "$progress_arg" \
@@ -936,12 +931,7 @@ download_http_fetch_to_file() {
   local ua="${3:-}"
   local connect_timeout="${4:-10}"
   local max_time="${5:-300}"
-  local asset_name="${6:-}"
   local progress_arg="--progress-bar"
-
-  if [ "$asset_name" = "subscription" ]; then
-    progress_arg="--silent"
-  fi
 
   curl_download \
     "$progress_arg" \

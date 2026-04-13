@@ -157,6 +157,22 @@ clashctl sub rename <旧名称> <新名称>
 clashctl sub remove <名称>
 ```
 
+### 本地订阅
+
+可以先手动下载 Clash 格式的订阅 YAML 文件到本地，再通过 `file://` 添加：
+
+格式：`clashctl add "file:///绝对路径/xxx.yaml" 名称`
+
+```bash
+mkdir -p ~/.config/clash-for-linux/subscriptions
+curl -L "https://example.com/sub.yaml" -o ~/.config/clash-for-linux/subscriptions/home.yaml
+clashctl add "file://$HOME/.config/clash-for-linux/subscriptions/home.yaml" home
+clashctl use home
+clashon
+```
+
+`file://` 只支持 Clash 本地 YAML 配置，不支持 convert 格式订阅。如果订阅源需要转换，请先转换为 Clash YAML 后再保存到本地文件。
+
 ------
 
 ## 🏗️ 架构设计架构简述
