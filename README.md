@@ -1,5 +1,5 @@
 <h1 align="center">
-  🐱 Clash for Linux</a>
+  🐧 Clash for Linux</a>
   <br>
 </h1>
 
