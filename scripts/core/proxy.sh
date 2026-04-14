@@ -113,8 +113,14 @@ system_proxy_write_block() {
   mv -f "${tmp}.clean" "$tmp"
 
   if [ "$mode" = "on" ]; then
-    http_url="$(proxy_http_url)"
-    socks_url="$(proxy_socks_url)"
+    if ! http_url="$(proxy_http_url 2>/dev/null)"; then
+      rm -f "$tmp" 2>/dev/null || true
+      return 1
+    fi
+    if ! socks_url="$(proxy_socks_url 2>/dev/null)"; then
+      rm -f "$tmp" 2>/dev/null || true
+      return 1
+    fi
     no_proxy="$(proxy_no_proxy_value)"
 
     {

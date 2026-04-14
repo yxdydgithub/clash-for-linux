@@ -64,6 +64,7 @@ bash install.sh
   clashctl ls        📡 查看订阅列表
 📌 高级
   clashctl tun       🧪 Tun 模式管理
+  clashctl boot      🚦 开机代理接管管理
   clashctl mixin     🧩 Mixin 配置管理
   clashctl relay     🔗 多跳节点管理
   clashctl sub       🧩 订阅高级管理（启用 / 禁用 / 重命名 / 删除）
@@ -155,6 +156,20 @@ clashctl sub remove <名称>
 ```
 
 WSL / 普通用户如果无权写入 `/etc/environment`，`clashon` 会自动降级：运行时照常启动，当前 Shell 代理变量生效；系统代理持久接管和开机代理保持不可用。
+
+### 开机接管（内核 + 代理）
+
+```bash
+clashctl boot status
+clashctl boot on
+clashctl boot off
+clashctl boot runtime on|off|status
+clashctl boot proxy on|off|status
+```
+
+- `boot runtime`：只管理内核开机自启（systemd / systemd-user 可用，script 后端为 `unsupported`）。
+- `boot proxy`：只管理 `/etc/environment` 中的代理持久块（决定开机后是否自动保持代理变量）。
+- `boot`：整体接管开关，等价于同时编排 runtime + proxy 两层状态。
 
 ### 本地订阅
 
