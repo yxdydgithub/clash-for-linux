@@ -6496,7 +6496,6 @@ warn_if_no_proxy_env() {
   ui_warn "当前未检测到代理环境"
   ui_next "建议先执行 clashon"
   ui_info "否则可能下载缓慢或失败"
-  ui_blank
 }
 
 cmd_upgrade() {
