@@ -56,6 +56,34 @@ clear_build_error_detail() {
   clear_build_error_meta
 }
 
+record_subconverter_build_error() {
+  local failure_type="$1"
+  local log_file="$2"
+  local preview_file="${3:-}"
+  local curl_rc="${4:-}"
+  local http_code="${5:-}"
+  local process_status="${6:-unknown}"
+  local detail
+
+  detail="subconverter 转换失败：$failure_type"
+  detail="${detail}
+subconverter_log : $log_file"
+  [ -n "${preview_file:-}" ] && detail="${detail}
+debug_preview    : $preview_file"
+  [ -n "${curl_rc:-}" ] && detail="${detail}
+curl_rc          : $curl_rc"
+  [ -n "${http_code:-}" ] && detail="${detail}
+http_code        : $http_code"
+  detail="${detail}
+process_status   : $process_status"
+  detail="${detail}
+next_step        : clashctl doctor；查看 subconverter_log 定位转换失败原因"
+
+  SUBCONVERTER_LAST_ERROR_DETAIL="$detail"
+  SUBCONVERTER_LAST_ERROR_SUMMARY="subconverter 转换失败：$failure_type"
+  record_build_error_detail "subconverter-convert" "$detail"
+}
+
 subscriptions_file() {
   echo "$RUNTIME_DIR/subscriptions.yaml"
 }
@@ -465,7 +493,6 @@ local_subscription_convert_url_from_url() {
   [ -s "$local_path" ] || die "本地订阅文件为空：$local_path"
 
   if convert_url="$(local_subscription_share_links_to_subconverter_url "$local_path")"; then
-    info "本地订阅识别为分享链接，将通过 subconverter 转换"
     LOCAL_SUBSCRIPTION_CONVERT_URL="$convert_url"
     return 0
   fi
@@ -476,7 +503,6 @@ local_subscription_convert_url_from_url() {
   if decode_local_subscription_base64 "$local_path" "$decoded_file"; then
     if convert_url="$(local_subscription_share_links_to_subconverter_url "$decoded_file")"; then
       rm -f "$decoded_file" 2>/dev/null || true
-      info "本地订阅识别为 Base64 分享链接，将通过 subconverter 转换"
       LOCAL_SUBSCRIPTION_CONVERT_URL="$convert_url"
       return 0
     fi
@@ -487,6 +513,37 @@ local_subscription_convert_url_from_url() {
 
   rm -f "$decoded_file" 2>/dev/null || true
   die "本地订阅不是 Clash YAML，且无法识别为 Base64 或 vmess/vless/trojan/tuic 分享链接：$local_path"
+}
+
+download_candidate_probe() {
+  local url="$1"
+  local ua="${__CLASH_DOWNLOAD_UA:-}"
+
+  curl_download -fsSIL \
+    --location \
+    --connect-timeout "$(download_probe_timeout)" \
+    --max-time "$(download_probe_timeout)" \
+    ${ua:+-A "$ua"} \
+    "$url" >/dev/null 2>&1
+}
+
+download_candidate_fetch() {
+  local url="$1"
+  local out="$2"
+  local progress_arg="--progress-bar"
+  local ua="${__CLASH_DOWNLOAD_UA:-}"
+
+  curl_download \
+    "$progress_arg" \
+    --show-error \
+    --fail \
+    --location \
+    --connect-timeout "$(download_connect_timeout)" \
+    --max-time "$(download_max_time)" \
+    --retry 1 \
+    ${ua:+-A "$ua"} \
+    --output "$out" \
+    "$url"
 }
 
 download_subscription_yaml() {
@@ -508,6 +565,7 @@ download_subscription_yaml() {
 
       require_subscription_fetch_allowed "$fetch_reason" "$url"
 
+      __CLASH_DOWNLOAD_UA="$(subconverter_subscription_user_agent)" \
       download_file \
         "$url" \
         "$out_file" \
@@ -791,12 +849,17 @@ fail_build_with_detail() {
   local included="$6"
   local failed="$7"
   local fallback_message="$8"
-  local detail
+  local detail record_detail
 
   detail="$(read_compile_error 2>/dev/null || true)"
   [ -n "${detail:-}" ] || detail="$fallback_message"
+  record_detail="$detail"
 
-  record_build_error_detail "$stage" "$detail"
+  if [ "$stage" = "fetch-source" ] && [ -n "${SUBCONVERTER_LAST_ERROR_DETAIL:-}" ]; then
+    record_detail="$SUBCONVERTER_LAST_ERROR_DETAIL"
+  fi
+
+  record_build_error_detail "$stage" "$record_detail"
   record_build_failure "$mode" "$policy" "$active" "$selected" "$included" "$failed"
   mark_runtime_build_not_applied "$stage"
   die "$detail"
@@ -2822,7 +2885,15 @@ start_subconverter() {
     if is_port_in_use "$(subconverter_port)"; then
       return 0
     fi
-    warn "检测到旧 subconverter 进程存在但端口未监听，正在重启"
+    {
+      echo
+      echo "===== clash-for-linux subconverter restart ====="
+      echo "time: $(now_datetime)"
+      echo "reason: old process exists but port is not listening"
+      echo "pid_file: $pid_file"
+      echo "port: $(subconverter_port)"
+      echo "===== end ====="
+    } >> "$log_file" 2>&1 || true
     stop_subconverter || true
   fi
 
@@ -2850,22 +2921,42 @@ start_subconverter() {
     fi
   fi
   {
-    error "subconverter 启动失败"
-    warn "启动命令：cd \"$home\" && \"$bin\""
-    warn "监听端口：$(subconverter_port)"
-    warn "pid 文件：$pid_file"
-    warn "pid：${pid:-unknown}"
+    echo
+    echo "===== clash-for-linux subconverter start failed ====="
+    echo "time: $(now_datetime)"
+    echo "command: cd \"$home\" && \"$bin\""
+    echo "port: $(subconverter_port)"
+    echo "pid_file: $pid_file"
+    echo "pid: ${pid:-unknown}"
     if [ -n "${pid:-}" ] && kill -0 "$pid" 2>/dev/null; then
-      warn "进程状态：仍在运行，但未监听预期端口"
+      echo "process_status: running but not listening on expected port"
     else
-      warn "进程状态：已退出或未成功启动"
-      warn "退出状态：$exit_status"
+      echo "process_status: exited or failed to start"
+      echo "exit_status: $exit_status"
     fi
-    warn "日志文件：$log_file"
-    if [ -f "$log_file" ]; then
-      tail -n 20 "$log_file" 2>/dev/null | sed 's/^/  /' >&2 || true
-    fi
-  } >&2
+    echo "log_file: $log_file"
+    echo "===== end ====="
+  } >> "$log_file" 2>&1 || true
+  if [ -n "${pid:-}" ] && kill -0 "$pid" 2>/dev/null; then
+    record_subconverter_build_error \
+      "启动失败：进程仍在运行但未监听预期端口" \
+      "$log_file" \
+      "" \
+      "" \
+      "" \
+      "running but not listening"
+  else
+    record_subconverter_build_error \
+      "启动失败：进程已退出或未成功启动" \
+      "$log_file" \
+      "" \
+      "" \
+      "" \
+      "not running"
+  fi
+  error "subconverter 启动失败"
+  warn "日志：$log_file"
+  warn "下一步：请运行 clashctl doctor，或查看上述日志定位 subconverter 异常"
   return 1
 }
 
@@ -2912,6 +3003,63 @@ subscription_yaml_validate() {
   fi
 
   return 0
+}
+
+subscription_yaml_node_count() {
+  local file="$1"
+
+  [ -s "$file" ] || {
+    echo "0"
+    return 0
+  }
+
+  "$(yq_bin)" eval '(.proxies // []) | length' "$file" 2>/dev/null | head -n 1
+}
+
+subscription_yaml_has_no_nodes() {
+  local file="$1"
+  local node_count provider_count
+
+  [ -s "$file" ] || return 0
+
+  node_count="$(subscription_yaml_node_count "$file")"
+  provider_count="$("$(yq_bin)" eval '(.["proxy-providers"] // {}) | length' "$file" 2>/dev/null | head -n 1)"
+
+  case "${node_count:-0}:${provider_count:-0}" in
+    0:0) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+subconverter_default_subscription_user_agent() {
+  echo "clash.meta/1.18.0 clash/1.18.0 subconverter/0.9.0"
+}
+
+subconverter_subscription_user_agent() {
+  local value
+
+  value="${CLASH_SUBSCRIPTION_UA:-}"
+  [ -n "${value:-}" ] || value="$(read_env_value "CLASH_SUBSCRIPTION_UA" 2>/dev/null || true)"
+  [ -n "${value:-}" ] || value="${CLASH_SUB_UA:-}"
+  [ -n "${value:-}" ] || value="$(read_env_value "CLASH_SUB_UA" 2>/dev/null || true)"
+  [ -n "${value:-}" ] || value="$(subconverter_default_subscription_user_agent)"
+
+  echo "$value"
+}
+
+subconverter_no_nodes_hint() {
+  echo "可能是订阅格式不兼容或需要 UA；可在 .env 配置 CLASH_SUBSCRIPTION_UA 后重试"
+}
+
+subconverter_response_has_no_nodes() {
+  local file="$1"
+
+  [ -s "$file" ] || return 1
+  grep -Fqi "No nodes were found" "$file"
+}
+
+warn_subconverter_no_nodes_hint() {
+  warn "$(subconverter_no_nodes_hint)"
 }
 
 write_subscription_invalid_debug_snapshot() {
@@ -3057,10 +3205,13 @@ convert_subscription_via_subconverter() {
   local api tmp_file curl_error_file
   local curl_meta curl_rc http_code effective_url errexit_was_set
   local log_file
-  local scheme convert_url
+  local scheme convert_url subscription_ua
   local validate_ok="false"
+  local failure_type process_status preview_file
 
   [ -n "${url:-}" ] || return 1
+
+  SUBCONVERTER_LAST_ZERO_NODES="false"
 
   scheme="$(subscription_url_scheme "$url")"
   convert_url="$url"
@@ -3081,7 +3232,10 @@ convert_subscription_via_subconverter() {
     auto|install|bootstrap|"")
       if [ "$scheme" != "file" ] && subscription_cache_restore "$url" "convert" "$out_file"; then
         if subscription_yaml_validate "$out_file"; then
-          return 0
+          if ! subscription_yaml_has_no_nodes "$out_file"; then
+            return 0
+          fi
+          SUBCONVERTER_LAST_ZERO_NODES="true"
         fi
         clear_subscription_cache "$url" "convert"
         rm -f "$out_file" 2>/dev/null || true
@@ -3089,37 +3243,16 @@ convert_subscription_via_subconverter() {
       ;;
   esac
 
+  SUBCONVERTER_LAST_ZERO_NODES="false"
   start_subconverter || return 1
   api="$(subconverter_url)/sub"
   log_file="$(subconverter_log_file)"
   tmp_file="$(mktemp)"
   curl_error_file="$(mktemp)"
   rm -f "$tmp_file" 2>/dev/null || true
+  subscription_ua="$(subconverter_subscription_user_agent)"
 
-  info "正在通过 subconverter 转换订阅"
-  case "$convert_reason" in
-    direct-clash-invalid)
-      if [ "$scheme" = "file" ]; then
-        info "转换原因：本地订阅不是可直接运行的 Clash YAML"
-      else
-        info "转换原因：直连订阅已下载，但不是可直接运行的 Clash YAML"
-      fi
-      ;;
-    subscription-type-convert)
-      info "转换原因：订阅类型为 convert"
-      ;;
-    *)
-      info "转换原因：$convert_reason"
-      ;;
-  esac
-  info "subconverter 请求：GET $api"
-  info "subconverter 参数：target=clash"
-  if [ "$scheme" = "file" ]; then
-    info "subconverter 参数：url=<本地订阅分享链接内容>"
-  else
-    info "subconverter 参数：url=$convert_url"
-  fi
-  info "subconverter 未发送参数：insert/config/emoji/list（使用 subconverter 默认值）"
+  info "正在转换订阅"
 
   errexit_was_set="false"
   case "$-" in
@@ -3129,7 +3262,7 @@ convert_subscription_via_subconverter() {
       ;;
   esac
 
-  curl_meta="$(curl -sS -L -G "$api" \
+  curl_meta="$(curl -sS -L -G -A "$subscription_ua" "$api" \
     --data-urlencode "target=clash" \
     --data-urlencode "url=$convert_url" \
     -o "$tmp_file" \
@@ -3140,26 +3273,73 @@ convert_subscription_via_subconverter() {
 
   http_code="$(printf '%s\n' "$curl_meta" | head -n 1)"
   effective_url="$(printf '%s\n' "$curl_meta" | sed -n '2p')"
-
-  if [ -n "${effective_url:-}" ]; then
-    if [ "$scheme" = "file" ]; then
-      info "subconverter 实际请求 URL：<已省略本地订阅分享链接内容>"
-    else
-      info "subconverter 实际请求 URL：$effective_url"
-    fi
+  if ! subconverter_running; then
+    process_status="not running"
+  else
+    process_status="running"
   fi
-  [ -n "${http_code:-}" ] && info "subconverter HTTP 状态码：$http_code"
+
+  {
+    echo
+    echo "===== clash-for-linux subconverter conversion ====="
+    echo "time: $(now_datetime)"
+    echo "reason: $convert_reason"
+    echo "request: GET $api"
+    echo "param: target=clash"
+    echo "request_user_agent: $subscription_ua"
+    if [ "$scheme" = "file" ]; then
+      echo "param: url=<local subscription share links>"
+    else
+      echo "param: url=$convert_url"
+    fi
+    echo "not_sent_params: insert/config/emoji/list (use subconverter defaults)"
+    [ -n "${effective_url:-}" ] && echo "effective_url: $effective_url"
+    echo "curl_rc: $curl_rc"
+    echo "http_code: ${http_code:-unknown}"
+    echo "process_status: $process_status"
+    if [ -s "$curl_error_file" ]; then
+      echo "curl_stderr_first_20_lines:"
+      head -n 20 "$curl_error_file" 2>/dev/null || true
+    fi
+    if [ -s "$tmp_file" ]; then
+      echo "response_body_first_20_lines:"
+      head -n 20 "$tmp_file" 2>/dev/null || true
+    fi
+    echo "===== end ====="
+  } >> "$log_file" 2>&1 || true
 
   if [ "$curl_rc" -ne 0 ] || [ -z "${http_code:-}" ] || [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
-    warn "subconverter 转换请求失败：curl_rc=$curl_rc http_code=${http_code:-unknown}"
-    [ -s "$curl_error_file" ] && {
-      warn "curl 错误输出："
-      head -n 20 "$curl_error_file" >&2
-    }
-    [ -s "$tmp_file" ] && {
-      warn "subconverter 响应体预览："
-      head -n 20 "$tmp_file" >&2
-    }
+    failure_type="curl/HTTP 请求失败"
+    if [ "${http_code:-}" = "413" ]; then
+      failure_type="响应过大（HTTP 413）"
+    fi
+    if subconverter_response_has_no_nodes "$tmp_file"; then
+      SUBCONVERTER_LAST_ZERO_NODES="true"
+      failure_type="No nodes were found，$(subconverter_no_nodes_hint)"
+    fi
+    warn "订阅转换失败"
+    if [ "${SUBCONVERTER_LAST_ZERO_NODES:-false}" = "true" ]; then
+      warn_subconverter_no_nodes_hint
+    fi
+    if [ "$curl_rc" -ne 0 ] && [ "${http_code:-}" = "000" ]; then
+      failure_type="服务端空响应/提前断开"
+      warn "subconverter 服务端空响应/提前断开"
+      if ! subconverter_running; then
+        failure_type="服务端空响应/提前断开，subconverter 可能已异常退出"
+        warn "subconverter 可能已异常退出"
+      fi
+    elif [ "$process_status" = "not running" ]; then
+      failure_type="${failure_type}，subconverter 可能已异常退出"
+    fi
+    record_subconverter_build_error \
+      "$failure_type" \
+      "$log_file" \
+      "" \
+      "$curl_rc" \
+      "${http_code:-unknown}" \
+      "$process_status"
+    warn "日志：$log_file"
+    warn "下一步：请运行 clashctl doctor，或查看上述日志定位 subconverter 异常"
     rm -f "$tmp_file" "$curl_error_file" 2>/dev/null || true
     return 1
   fi
@@ -3167,6 +3347,19 @@ convert_subscription_via_subconverter() {
   rm -f "$curl_error_file" 2>/dev/null || true
 
   [ -s "$tmp_file" ] || {
+    {
+      echo "result: empty response body"
+    } >> "$log_file" 2>&1 || true
+    record_subconverter_build_error \
+      "返回内容为空" \
+      "$log_file" \
+      "" \
+      "$curl_rc" \
+      "${http_code:-unknown}" \
+      "$process_status"
+    warn "订阅转换失败：subconverter 返回内容为空"
+    warn "日志：$log_file"
+    warn "下一步：请运行 clashctl doctor，或查看上述日志定位 subconverter 异常"
     rm -f "$tmp_file" 2>/dev/null || true
     return 1
   }
@@ -3177,11 +3370,50 @@ convert_subscription_via_subconverter() {
 
   if [ "$validate_ok" != "true" ]; then
     write_subscription_invalid_debug_snapshot "$tmp_file"
+    preview_file="$(config_tmp_dir)/subscription-invalid-preview.txt"
+    if subconverter_response_has_no_nodes "$tmp_file"; then
+      SUBCONVERTER_LAST_ZERO_NODES="true"
+      failure_type="No nodes were found，$(subconverter_no_nodes_hint)"
+    else
+      failure_type="返回内容不是合法 Clash YAML"
+    fi
 
-    warn "subconverter 返回内容不是合法 Clash YAML"
-    warn "调试预览已写入：$(config_tmp_dir)/subscription-invalid-preview.txt"
-    [ -f "$log_file" ] && warn "subconverter 日志：$log_file"
+    {
+      echo "invalid_yaml_preview: $preview_file"
+    } >> "$log_file" 2>&1 || true
+    record_subconverter_build_error \
+      "$failure_type" \
+      "$log_file" \
+      "$preview_file" \
+      "$curl_rc" \
+      "${http_code:-unknown}" \
+      "$process_status"
 
+    if [ "${SUBCONVERTER_LAST_ZERO_NODES:-false}" = "true" ]; then
+      warn "订阅转换失败：No nodes were found"
+      warn_subconverter_no_nodes_hint
+    else
+      warn "订阅转换失败：subconverter 返回内容不是合法 Clash YAML"
+    fi
+    warn "日志：$log_file"
+    warn "下一步：请运行 clashctl doctor，或查看上述日志定位 subconverter 异常"
+
+    rm -f "$tmp_file" 2>/dev/null || true
+    return 1
+  fi
+
+  if subscription_yaml_has_no_nodes "$tmp_file"; then
+    SUBCONVERTER_LAST_ZERO_NODES="true"
+    record_subconverter_build_error \
+      "转换结果为 0 节点，$(subconverter_no_nodes_hint)" \
+      "$log_file" \
+      "" \
+      "$curl_rc" \
+      "${http_code:-unknown}" \
+      "$process_status"
+    warn "订阅转换失败：subconverter 转换结果为 0 节点"
+    warn_subconverter_no_nodes_hint
+    warn "日志：$log_file"
     rm -f "$tmp_file" 2>/dev/null || true
     return 1
   fi
@@ -3394,6 +3626,9 @@ fetch_subscription_source() {
   raw_file="$(mktemp)"
   candidate_file="$(mktemp)"
   rm -f "$raw_file" "$candidate_file" 2>/dev/null || true
+  SUBCONVERTER_LAST_ERROR_DETAIL=""
+  SUBCONVERTER_LAST_ERROR_SUMMARY=""
+  SUBCONVERTER_LAST_ZERO_NODES="false"
 
   if [ -z "${url:-}" ]; then
     mark_subscription_health_failure "$name" "订阅源地址为空"
@@ -3439,10 +3674,35 @@ fetch_subscription_source() {
             reason="订阅下载成功，但原始配置与转换结果都不能直接运行"
           fi
         else
-          if [ "$scheme" = "file" ]; then
-            reason="本地订阅不是 Clash YAML，且 subconverter 转换失败"
+          warn "订阅下载成功但转换失败"
+          if [ "${SUBCONVERTER_LAST_ZERO_NODES:-false}" = "true" ]; then
+            warn "subconverter returned 0 nodes; trying raw Clash YAML fallback"
+
+            rm -f "$raw_file" "$candidate_file" 2>/dev/null || true
+            raw_file="$(mktemp)"
+            candidate_file="$(mktemp)"
+            rm -f "$raw_file" "$candidate_file" 2>/dev/null || true
+
+            if download_subscription_yaml "$url" "$raw_file" "$fetch_reason"; then
+              if build_runtime_candidate_from_payload "$raw_file" "$candidate_file"; then
+                mv -f "$candidate_file" "$out_file"
+                rm -f "$raw_file" 2>/dev/null || true
+                mark_subscription_health_success "$name"
+                return 0
+              fi
+
+              write_subscription_invalid_debug_snapshot "$raw_file"
+              reason="subconverter failed: No nodes were found; raw Clash YAML fallback was tried but is not directly runnable"
+            else
+              reason="subconverter failed: No nodes were found; raw Clash YAML fallback download failed"
+            fi
           else
-            reason="订阅下载成功，但原始配置不能直接运行，且转换失败"
+            warn_subconverter_no_nodes_hint
+            if [ "$scheme" = "file" ]; then
+            reason="本地订阅不是 Clash YAML，且 subconverter 转换失败；$(subconverter_no_nodes_hint)"
+          else
+            reason="订阅下载成功，但原始配置不能直接运行，且转换失败；$(subconverter_no_nodes_hint)"
+          fi
           fi
         fi
       else
@@ -3468,6 +3728,28 @@ fetch_subscription_source() {
         reason="订阅转换成功，但转换结果不能直接运行"
       else
         reason="订阅转换失败"
+        if [ "${SUBCONVERTER_LAST_ZERO_NODES:-false}" = "true" ]; then
+          warn "subconverter 未解析到节点，尝试直接使用原始订阅（Clash YAML fallback）"
+
+          rm -f "$raw_file" "$candidate_file" 2>/dev/null || true
+          raw_file="$(mktemp)"
+          candidate_file="$(mktemp)"
+          rm -f "$raw_file" "$candidate_file" 2>/dev/null || true
+
+          if download_subscription_yaml "$url" "$raw_file" "$fetch_reason"; then
+            if build_runtime_candidate_from_payload "$raw_file" "$candidate_file"; then
+              mv -f "$candidate_file" "$out_file"
+              rm -f "$raw_file" 2>/dev/null || true
+              mark_subscription_health_success "$name"
+              return 0
+            fi
+
+            write_subscription_invalid_debug_snapshot "$raw_file"
+            reason="订阅转换失败：No nodes were found；已尝试原始订阅 fallback，但原始订阅不是可直接运行的 Clash YAML"
+          else
+            reason="订阅转换失败：No nodes were found；原始订阅 fallback 下载失败"
+          fi
+        fi
       fi
       ;;
     *)
@@ -3511,8 +3793,13 @@ generate_config() {
 
   if ! fetch_subscription_source "$active_source" "$source_file" "auto"; then
     failed_csv="$active_source"
-    write_compile_error "当前主订阅不可用"
-    append_compile_error "source : $active_source"
+    if [ -n "${SUBCONVERTER_LAST_ERROR_SUMMARY:-}" ]; then
+      write_compile_error "当前主订阅不可用：$active_source"
+      append_compile_error "reason : $SUBCONVERTER_LAST_ERROR_SUMMARY"
+    else
+      write_compile_error "当前主订阅不可用"
+      append_compile_error "source : $active_source"
+    fi
     fail_build_with_detail \
       "fetch-source" \
       "single" \
