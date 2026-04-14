@@ -2816,7 +2816,7 @@ prompt_subscription_if_needed() {
   fi
 
   input_fmt="$(detect_subscription_format "$input_url")"
-  write_env_value "CLASH_SUBSCRIPTION_URL" "$input_url"
+  INSTALL_PENDING_SUBSCRIPTION_URL="$input_url"
   bootstrap_subscription_from_install_input "$input_url" "$input_fmt" "default"
 }
 

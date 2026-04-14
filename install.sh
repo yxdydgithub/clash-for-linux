@@ -41,6 +41,9 @@ prompt_subscription_if_needed
 
 if [ -n "$(subscription_url 2>/dev/null || true)" ]; then
   if generate_config; then
+    if [ -n "${INSTALL_PENDING_SUBSCRIPTION_URL:-}" ]; then
+      write_env_value "CLASH_SUBSCRIPTION_URL" "$INSTALL_PENDING_SUBSCRIPTION_URL"
+    fi
     echo "✨ 订阅已生效"
     post_install_verify
   else
