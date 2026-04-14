@@ -312,6 +312,7 @@ post_install_verify() {
   local has_subscription="false"
   local runtime_ready="false"
   local controller_ready="false"
+  local bind_failure_kind="" bind_failure_port=""
 
   if clashctl_command_available; then
     write_runtime_value "INSTALL_VERIFY_COMMAND_READY" "true"
@@ -348,10 +349,23 @@ post_install_verify() {
 
   runtime_ready="$(install_verify_runtime_ready 2>/dev/null || true)"
   controller_ready="$(install_verify_controller_ready 2>/dev/null || true)"
+  bind_failure_kind="$(install_mixed_port_bind_failure_kind 2>/dev/null || true)"
+  bind_failure_port="$(install_mixed_port_bind_failure_port 2>/dev/null || true)"
+
+  if [ "${has_subscription:-false}" = "true" ] && [ "${bind_failure_kind:-}" = "bind_denied" ]; then
+    echo
+    echo "🚫 安装后验证发现：代理端口 ${bind_failure_port:-unknown} 绑定被系统拒绝（非端口冲突）"
+    echo "📌 修改端口通常无法解决；install 阶段不会通过自动换端口处理该问题"
+    install_mixed_port_bind_observation_line 2>/dev/null || true
+    echo "👉 下一步：clashctl doctor"
+    echo "👉 日志：clashctl logs mihomo"
+    echo
+  fi
 
   if [ "$has_subscription" = "true" ] \
     && [ "${runtime_ready:-false}" = "true" ] \
-    && [ "${controller_ready:-false}" = "true" ]; then
+    && [ "${controller_ready:-false}" = "true" ] \
+    && [ "${bind_failure_kind:-}" != "bind_denied" ]; then
     write_runtime_event_value "RUNTIME_LAST_INSTALL_READY" "true"
   else
     write_runtime_event_value "RUNTIME_LAST_INSTALL_READY" "false"
