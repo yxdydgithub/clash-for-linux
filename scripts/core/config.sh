@@ -399,13 +399,10 @@ download_subscription_yaml() {
 
       require_subscription_fetch_allowed "$fetch_reason" "$url"
 
-      download_text_file \
+      download_file \
         "$url" \
         "$out_file" \
-        "subscription" \
-        "$(subscription_user_agent)" \
-        "10" \
-        "45"
+        "subscription"
 
       subscription_cache_store "$url" "$fmt" "$out_file" "$url"
       ;;
@@ -2627,9 +2624,9 @@ prompt_subscription_if_needed() {
   fi
 
   echo
-  echo "📡 订阅"
+  echo "📦 订阅"
   echo "请输入订阅链接"
-  echo "直接回车可跳过，稍后执行：clashctl add <订阅链接>"
+  # echo "直接回车可跳过，稍后执行：clashctl add <订阅链接>"
   printf "> "
   IFS= read -r input_url || true
 

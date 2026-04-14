@@ -41,7 +41,7 @@ prompt_subscription_if_needed
 
 if [ -n "$(subscription_url 2>/dev/null || true)" ]; then
   if generate_config; then
-    echo "📡 订阅已生效"
+    echo "✨ 订阅已生效"
     post_install_verify
   else
     write_runtime_value "INSTALL_VERIFY_CONFIG_READY" "false"
