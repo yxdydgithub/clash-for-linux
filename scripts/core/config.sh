@@ -399,13 +399,10 @@ download_subscription_yaml() {
 
       require_subscription_fetch_allowed "$fetch_reason" "$url"
 
-      download_text_file \
+      download_file \
         "$url" \
         "$out_file" \
-        "subscription" \
-        "$(subscription_user_agent)" \
-        "10" \
-        "45"
+        "subscription"
 
       subscription_cache_store "$url" "$fmt" "$out_file" "$url"
       ;;
