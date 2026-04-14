@@ -2618,7 +2618,7 @@ remove_alias_command_wrappers() {
 }
 
 install_status_text() {
-  local has_subscription install_ready runtime_ready controller_ready build_status
+  local has_subscription install_ready runtime_ready controller_ready build_status bind_failure_kind
   local live_runtime="false"
   local live_controller="false"
 
@@ -2632,6 +2632,7 @@ install_status_text() {
   runtime_ready="$(install_verify_runtime_ready 2>/dev/null || true)"
   controller_ready="$(install_verify_controller_ready 2>/dev/null || true)"
   build_status="$(read_build_value "BUILD_LAST_STATUS" 2>/dev/null || true)"
+  bind_failure_kind="$(install_mixed_port_bind_failure_kind 2>/dev/null || true)"
 
   if status_is_running 2>/dev/null; then
     live_runtime="true"
@@ -2647,6 +2648,11 @@ install_status_text() {
   fi
 
   if [ "${build_status:-}" = "failed" ]; then
+    echo "broken"
+    return 0
+  fi
+
+  if [ -n "${bind_failure_kind:-}" ]; then
     echo "broken"
     return 0
   fi
@@ -2670,6 +2676,72 @@ install_status_text() {
   fi
 
   echo "verifying"
+}
+
+install_mixed_port_bind_failure_line() {
+  local log_file="$LOG_DIR/mihomo.out.log"
+  local mixed_port line
+
+  [ -f "$log_file" ] || return 1
+  runtime_config_exists 2>/dev/null || return 1
+
+  mixed_port="$(runtime_config_mixed_port 2>/dev/null || true)"
+  if [ -n "${mixed_port:-}" ] && [ "$mixed_port" != "null" ]; then
+    line="$(grep -Ei "Start Mixed.*server error: listen tcp .*:${mixed_port}:.*(operation not permitted|permission denied|address already in use)" "$log_file" 2>/dev/null | tail -n 1 || true)"
+  fi
+
+  if [ -z "${line:-}" ]; then
+    line="$(grep -Ei 'Start Mixed.*server error: listen tcp .*:.*(operation not permitted|permission denied|address already in use)' "$log_file" 2>/dev/null | tail -n 1 || true)"
+  fi
+
+  [ -n "${line:-}" ] || return 1
+  printf '%s\n' "$line"
+}
+
+install_mixed_port_bind_failure_kind() {
+  local line lower
+
+  line="$(install_mixed_port_bind_failure_line 2>/dev/null || true)"
+  [ -n "${line:-}" ] || return 1
+
+  lower="$(printf '%s' "$line" | tr '[:upper:]' '[:lower:]')"
+  case "$lower" in
+    *"address already in use"*)
+      echo "address_in_use"
+      ;;
+    *"operation not permitted"*|*"permission denied"*)
+      echo "bind_denied"
+      ;;
+    *)
+      echo "bind_failed"
+      ;;
+  esac
+}
+
+install_mixed_port_bind_failure_port() {
+  local port line
+
+  port="$(runtime_config_mixed_port 2>/dev/null || true)"
+  if runtime_port_value_is_valid "$port"; then
+    echo "$port"
+    return 0
+  fi
+
+  line="$(install_mixed_port_bind_failure_line 2>/dev/null || true)"
+  [ -n "${line:-}" ] || return 1
+  printf '%s\n' "$line" | grep -Eo ':[0-9]+:' | tail -n 1 | tr -d ':'
+}
+
+install_mixed_port_bind_observation_line() {
+  local mixed_port controller_port
+
+  mixed_port="$(install_mixed_port_bind_failure_port 2>/dev/null || true)"
+  controller_port="$(runtime_config_controller_port 2>/dev/null || true)"
+
+  if proxy_controller_reachable 2>/dev/null \
+    || { runtime_port_value_is_valid "$controller_port" && is_port_in_use "$controller_port"; }; then
+    echo "配置已加载，控制器已启动，仅代理端口 ${mixed_port:-unknown} 绑定失败；这不是订阅或配置主链失败"
+  fi
 }
 
 install_status_label() {
@@ -2715,9 +2787,10 @@ install_default_next_action() {
 }
 
 install_runtime_brief_line() {
-  local status_text mixed_port controller controller_display
+  local status_text mixed_port controller controller_display bind_failure_kind
 
   status_text="$(install_status_text)"
+  bind_failure_kind="$(install_mixed_port_bind_failure_kind 2>/dev/null || true)"
   mixed_port="$(install_plan_mixed_port 2>/dev/null || true)"
   [ -n "${mixed_port:-}" ] || mixed_port="$(read_env_value "MIXED_PORT" 2>/dev/null || echo "7890")"
 
@@ -2750,6 +2823,15 @@ install_runtime_brief_line() {
       ;;
     broken)
       echo "❗ 当前状态：broken"
+      case "${bind_failure_kind:-}" in
+        bind_denied)
+          echo "🚫 代理端口绑定被系统拒绝（非端口冲突）"
+          echo "📌 修改端口通常无法解决，请先排查当前环境限制"
+          ;;
+        address_in_use)
+          echo "⚠️  代理端口存在冲突（address already in use）"
+          ;;
+      esac
       ;;
     *)
       echo "⚪ 当前状态：unknown"
@@ -2826,6 +2908,19 @@ print_install_summary() {
   echo "🔧 运行后端：${backend_text:-unknown}"
   echo "📦 订阅：$subscription_text"
   [ -n "${node_count:-}" ] && echo "🔢 节点数量：$node_count"
+
+  case "$(install_mixed_port_bind_failure_kind 2>/dev/null || true)" in
+    bind_denied)
+      echo "🚫 安装后验证：代理端口绑定被系统拒绝（非端口冲突）"
+      echo "📌 这通常是环境限制，修改端口通常无法解决"
+      install_mixed_port_bind_observation_line 2>/dev/null || true
+      echo "👉 下一步：clashctl doctor"
+      echo "👉 日志：clashctl logs mihomo"
+      ;;
+    address_in_use)
+      :
+      ;;
+  esac
 
   if [ -f "$clashctl_file" ]; then
     CLASH_UI_BOX_ONLY=1 bash "$clashctl_file" ui || true
