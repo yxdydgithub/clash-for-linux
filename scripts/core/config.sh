@@ -1940,12 +1940,12 @@ apply_mixin_prepend_arrays() {
   [ -s "$runtime_file" ] || die "运行配置不存在：$runtime_file"
   [ -f "$mixin_file_path" ] || return 0
 
-  RUNTIME_FILE="$runtime_file" MIXIN_FILE="$mixin_file_path" "$(yq_bin)" eval-all -i '
-    select(fileIndex == 0)
-    | .proxies = (((select(fileIndex == 1).prepend.proxies // []) + (.proxies // [])) | unique_by(.name))
-    | .["proxy-groups"] = (((select(fileIndex == 1).prepend["proxy-groups"] // []) + (.["proxy-groups"] // [])) | unique_by(.name))
-    | .rules = (((select(fileIndex == 1).prepend.rules // []) + (.rules // [])) | unique)
-  ' "$runtime_file" "$mixin_file_path"
+  RUNTIME_FILE="$runtime_file" MIXIN_FILE="$mixin_file_path" "$(yq_bin)" eval -i '
+    (load(strenv(MIXIN_FILE)) // {}) as $mixin
+    | .proxies = ((($mixin.prepend.proxies // []) + (.proxies // [])) | unique_by(.name))
+    | .["proxy-groups"] = ((($mixin.prepend["proxy-groups"] // []) + (.["proxy-groups"] // [])) | unique_by(.name))
+    | .rules = ((($mixin.prepend.rules // []) + (.rules // [])) | unique)
+  ' "$runtime_file"
 }
 
 apply_mixin_append_arrays() {
@@ -1956,12 +1956,12 @@ apply_mixin_append_arrays() {
   [ -s "$runtime_file" ] || die "运行配置不存在：$runtime_file"
   [ -f "$mixin_file_path" ] || return 0
 
-  RUNTIME_FILE="$runtime_file" MIXIN_FILE="$mixin_file_path" "$(yq_bin)" eval-all -i '
-    select(fileIndex == 0)
-    | .proxies = (((.proxies // []) + (select(fileIndex == 1).append.proxies // [])) | unique_by(.name))
-    | .["proxy-groups"] = (((.["proxy-groups"] // []) + (select(fileIndex == 1).append["proxy-groups"] // [])) | unique_by(.name))
-    | .rules = (((.rules // []) + (select(fileIndex == 1).append.rules // [])) | unique)
-  ' "$runtime_file" "$mixin_file_path"
+  RUNTIME_FILE="$runtime_file" MIXIN_FILE="$mixin_file_path" "$(yq_bin)" eval -i '
+    (load(strenv(MIXIN_FILE)) // {}) as $mixin
+    | .proxies = (((.proxies // []) + ($mixin.append.proxies // [])) | unique_by(.name))
+    | .["proxy-groups"] = (((.["proxy-groups"] // []) + ($mixin.append["proxy-groups"] // [])) | unique_by(.name))
+    | .rules = (((.rules // []) + ($mixin.append.rules // [])) | unique)
+  ' "$runtime_file"
 }
 
 apply_runtime_mixin() {
