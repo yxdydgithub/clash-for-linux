@@ -34,7 +34,7 @@ Usage:
 
 🕹️  Control:
   clashui                        🕹️  查看 Web 控制台
-  secret                         🔑 管理 Web 密钥（show / set）
+  secret                         🔑 查看或设置 Web 密钥
   clashsecret                    🔑 查看或设置 Web 密钥
 
 🩺 Diagnose:
@@ -3899,7 +3899,7 @@ cmd_mixin_show() {
   else
     cat "$file"
     if mixin_config_has_secret_override "$file"; then
-      ui_warn "检测到 override.secret：该字段已忽略，请改用 clashctl secret set"
+      ui_warn "检测到 override.secret：该字段已忽略，请改用 clashctl secret <密钥>"
     fi
   fi
   ui_blank
@@ -4589,44 +4589,19 @@ cmd_secret() {
 
   prepare
 
-  case "${1:-}" in
-    ""|show)
-      [ "$#" -le 1 ] || die_usage "secret show 参数不合法" "clashctl secret show"
-      show_controller_secret_from_env
-      ;;
-    set)
-      shift || true
-      [ "$#" -le 1 ] || die_usage "secret set 参数不合法" "clashctl secret set [密钥]"
-      new_secret="${1:-}"
-      [ -n "${new_secret:-}" ] || new_secret="$(generate_secure_secret)"
-      set_controller_secret "$new_secret"
+  if [ "$#" -eq 0 ]; then
+    show_controller_secret_from_env
+    return 0
+  fi
 
-      synced="true"
-      sync_runtime_controller_secret_from_env || synced="false"
-      print_controller_secret_apply_feedback "$synced"
-      ;;
-    help|-h|--help)
-      echo
-      echo "🔑 控制器密钥"
-      echo
-      echo "用法："
-      echo "  clashctl secret show"
-      echo "  clashctl secret set [密钥]"
-      echo
-      echo "兼容："
-      echo "  clashctl secret [密钥]"
-      echo "  clashsecret [密钥]"
-      echo
-      ;;
-    *)
-      new_secret="$1"
-      set_controller_secret "$new_secret"
+  [ "$#" -eq 1 ] || die_usage "secret 参数不合法" "clashctl secret <密钥>"
 
-      synced="true"
-      sync_runtime_controller_secret_from_env || synced="false"
-      print_controller_secret_apply_feedback "$synced"
-      ;;
-  esac
+  new_secret="$1"
+  set_controller_secret "$new_secret"
+
+  synced="true"
+  sync_runtime_controller_secret_from_env || synced="false"
+  print_controller_secret_apply_feedback "$synced"
 }
 
 cmd_tun_status() {

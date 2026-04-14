@@ -63,8 +63,8 @@ bash install.sh
   clashctl use         💱 切换订阅
   clashctl ls          📡 查看订阅列表
 🔐 密钥管理
-  clashctl secret show 🔑 查看密钥
-  clashctl secret set  🔐 设置密钥
+  clashctl secret      🔑 查看密钥
+  clashctl secret 123  🔐 设置密钥
 📌 高级
   clashctl tun       🧪 Tun 模式管理
   clashctl boot      🚦 开机代理接管管理
@@ -108,7 +108,7 @@ $ clashsecret
 ```
 
 - 可通过浏览器打开 `Web` 控制台进行可视化操作，例如切换节点、查看日志等。
-- `clashctl secret` 作为兼容入口继续保留，日常优先使用 `clashsecret`。
+- `clashctl secret` 与 `clashsecret` 都支持无参数查看、有参数直接设置。
 - 默认使用 [zashboard](https://github.com/Zephyruso/zashboard) 作为控制台前端，如需更换可自行配置。
 - 若需将控制台暴露到公网，建议定期更换访问密钥，或通过 `SSH` 端口转发方式进行安全访问。
 
