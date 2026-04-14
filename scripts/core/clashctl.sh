@@ -275,7 +275,6 @@ cmd_on() {
       ui_warn "系统代理持久接管写入失败，仅当前 Shell 生效"
       ui_next "clashctl doctor"
     fi
-    ui_blank
   fi
 
   load_system_state
