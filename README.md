@@ -267,15 +267,22 @@ Control 层负责把常用动作收口成可理解的命令和反馈。
 
 当前规则很明确：`generate_config` 只处理当前 active 主订阅。
 
-### Runtime
+### Runtime 说明（重要）
 
-实际运行层。
+`runtime/` 是运行时目录，不是配置目录。
 
-- `runtime/` 是唯一运行时容器
-- 后端可以是 `systemd`、`systemd-user` 或 `script`
-- 运行配置是 `runtime/config.yaml`
-- 订阅集合状态是 `runtime/subscriptions.yaml`（历史 `config/subscriptions.yaml` 仅用于兼容迁移）
-- 日志、状态、缓存和运行时产物都收敛到 runtime 体系
+它的作用是作为“唯一运行容器”，用于存放：
+
+\- 运行内核（mihomo / clash）
+\- 运行配置（config.yaml）
+\- 订阅状态（subscriptions.yaml）
+\- dashboard 前端
+\- 日志（logs）
+\- 构建中间文件（tmp）
+
+这些内容都是 **install / 运行过程中动态生成的**，不会作为仓库内容长期维护。
+
+
 
 ## 配置说明
 
