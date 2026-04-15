@@ -4,7 +4,7 @@
 </h1>
 
 <p align="center">
-  💬 社区交流：<a href="https://t.me/your_group">Telegram 群</a>
+  💬 社区交流：<a href="https://t.me/+NsYaX9kzqERlNzZl">Telegram 群</a>
 </p>
 
 <h3 align="center">
