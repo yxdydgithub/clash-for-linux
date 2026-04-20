@@ -365,6 +365,7 @@ proxy_group_select() {
   local node="$2"
   local base secret
   local code response_file response_body
+  local available_node found
 
   [ -n "${group:-}" ] || die "策略组名称不能为空"
   [ -n "${node:-}" ] || die "节点名称不能为空"
@@ -372,7 +373,16 @@ proxy_group_select() {
   proxy_group_exists "$group" || die "策略组不存在：$group"
   proxy_group_is_selector "$group" || die "该策略组不支持手动切换：$group"
 
-  if ! proxy_group_selectable_nodes "$group" | grep -Fxq "$node"; then
+  found=false
+  while IFS= read -r available_node; do
+    [ -n "${available_node:-}" ] || continue
+    if [ "$available_node" = "$node" ]; then
+      found=true
+      break
+    fi
+  done < <(proxy_group_selectable_nodes "$group")
+
+  if [ "$found" != "true" ]; then
     die "节点不存在于策略组中：$group -> $node"
   fi
 
