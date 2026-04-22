@@ -293,6 +293,21 @@ proxy_group_is_selector() {
   esac
 }
 
+proxy_group_is_manual_selector() {
+  local type
+
+  type="$(proxy_group_type "$1")"
+
+  case "$type" in
+    Selector)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 proxy_group_list() {
   proxy_groups_json \
     | "$(yq_bin)" -p=json eval '
@@ -360,6 +375,32 @@ proxy_group_selectable_nodes() {
   done < <(proxy_group_nodes "$group")
 }
 
+proxy_group_supports_manual_pick() {
+  local group="$1"
+  local node
+
+  [ -n "${group:-}" ] || return 1
+  proxy_group_exists "$group" || return 1
+  proxy_group_is_manual_selector "$group" || return 1
+
+  while IFS= read -r node; do
+    [ -n "${node:-}" ] || continue
+    return 0
+  done < <(proxy_group_selectable_nodes "$group")
+
+  return 1
+}
+
+proxy_group_manual_list() {
+  local group
+
+  while IFS= read -r group; do
+    [ -n "${group:-}" ] || continue
+    proxy_group_supports_manual_pick "$group" || continue
+    echo "$group"
+  done < <(proxy_group_list)
+}
+
 proxy_group_select() {
   local group="$1"
   local node="$2"
@@ -371,7 +412,7 @@ proxy_group_select() {
   [ -n "${node:-}" ] || die "节点名称不能为空"
 
   proxy_group_exists "$group" || die "策略组不存在：$group"
-  proxy_group_is_selector "$group" || die "该策略组不支持手动切换：$group"
+  proxy_group_supports_manual_pick "$group" || die "该策略组不支持手动切换：$group"
 
   found=false
   while IFS= read -r available_node; do
@@ -510,7 +551,7 @@ ensure_default_proxy_group_relay_selected() {
     else
       switched="${group}|${current}|${relay}"
     fi
-  done < <(proxy_group_list)
+  done < <(proxy_group_manual_list)
 
   [ -n "${switched:-}" ] && echo "$switched"
 }
