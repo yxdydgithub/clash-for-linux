@@ -294,18 +294,32 @@ proxy_group_is_selector() {
 }
 
 proxy_group_is_manual_selector() {
-  local type
+  proxy_group_supports_manual_pick "$1"
+}
 
-  type="$(proxy_group_type "$1")"
+proxy_group_is_auto_managed() {
+  local group="$1"
+  local type normalized_type
 
-  case "$type" in
-    Selector)
+  [ -n "${group:-}" ] || return 0
+  proxy_group_exists "$group" || return 0
+
+  type="$(proxy_group_type "$group" 2>/dev/null || true)"
+  normalized_type="$(printf '%s' "${type:-}" | tr '[:upper:]' '[:lower:]')"
+
+  case "$normalized_type" in
+    urltest|url-test|fallback|loadbalance|load-balance)
       return 0
       ;;
-    *)
-      return 1
+  esac
+
+  case "$group" in
+    自动选择|故障转移)
+      return 0
       ;;
   esac
+
+  return 1
 }
 
 proxy_group_list() {
@@ -378,10 +392,18 @@ proxy_group_selectable_nodes() {
 proxy_group_supports_manual_pick() {
   local group="$1"
   local node
+  local has_now=""
 
   [ -n "${group:-}" ] || return 1
   proxy_group_exists "$group" || return 1
-  proxy_group_is_manual_selector "$group" || return 1
+  proxy_group_is_auto_managed "$group" && return 1
+
+  has_now="$(
+    proxy_groups_json \
+      | "$(yq_bin)" -p=json eval ".proxies.\"$group\".now != null" - 2>/dev/null \
+      | head -n 1
+  )"
+  [ "${has_now:-false}" = "true" ] || return 1
 
   while IFS= read -r node; do
     [ -n "${node:-}" ] || continue
