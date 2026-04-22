@@ -297,18 +297,6 @@ proxy-groups: []
 rules: []
 EOF
 
-  [ -f "$CONFIG_DIR/mixin.yaml" ] || cat > "$CONFIG_DIR/mixin.yaml" <<'EOF'
-override: {}
-prepend:
-  proxies: []
-  proxy-groups: []
-  rules: []
-append:
-  proxies: []
-  proxy-groups: []
-  rules: []
-EOF
-
   [ -f "$CONFIG_DIR/profiles.yaml" ] || cat > "$CONFIG_DIR/profiles.yaml" <<'EOF'
 active: default
 profiles:
@@ -1974,17 +1962,93 @@ mark_install_port_plan() {
 }
 
 mixin_file() {
+  echo "$RUNTIME_DIR/mixin.yaml"
+}
+
+mixin_legacy_file() {
   echo "$CONFIG_DIR/mixin.yaml"
+}
+
+write_default_mixin_template() {
+  local file="$1"
+  cat > "$file" <<'EOF'
+override: {}
+prepend:
+  proxies: []
+  proxy-groups: []
+  rules: []
+append:
+  proxies: []
+  proxy-groups: []
+  rules: []
+EOF
+}
+
+mixin_conflict_notice_file() {
+  echo "$RUNTIME_DIR/.mixin-conflict-noticed"
+}
+
+warn_mixin_path_conflict_once() {
+  local notice_file
+  notice_file="$(mixin_conflict_notice_file)"
+  if [ -f "$notice_file" ]; then
+    return 0
+  fi
+
+  warn "检测到新旧 mixin 配置同时存在且内容不一致。将优先使用 $(mixin_file)，旧文件 $(mixin_legacy_file) 仅保留兼容读取。"
+  warn "迁移建议：请将 $(mixin_legacy_file) 的自定义内容合并到 $(mixin_file)，并停止修改旧路径。"
+
+  mkdir -p "$RUNTIME_DIR"
+  : > "$notice_file"
+}
+
+mixin_read_file() {
+  local new_file legacy_file
+  new_file="$(mixin_file)"
+  legacy_file="$(mixin_legacy_file)"
+
+  if [ -f "$new_file" ]; then
+    if [ -f "$legacy_file" ] && ! cmp -s "$new_file" "$legacy_file" 2>/dev/null; then
+      warn_mixin_path_conflict_once
+    fi
+    echo "$new_file"
+    return 0
+  fi
+
+  if [ -f "$legacy_file" ]; then
+    echo "$legacy_file"
+    return 0
+  fi
+
+  echo "$new_file"
+}
+
+migrate_legacy_mixin_to_runtime_if_needed() {
+  local new_file legacy_file
+  new_file="$(mixin_file)"
+  legacy_file="$(mixin_legacy_file)"
+
+  [ -f "$new_file" ] && return 0
+  [ -f "$legacy_file" ] || return 0
+
+  mkdir -p "$RUNTIME_DIR"
+  cp -f "$legacy_file" "$new_file" 2>/dev/null || true
 }
 
 ensure_mixin_file() {
   ensure_config_files
+  migrate_legacy_mixin_to_runtime_if_needed
+
+  if [ ! -f "$(mixin_file)" ]; then
+    mkdir -p "$RUNTIME_DIR"
+    write_default_mixin_template "$(mixin_file)"
+  fi
 }
 
 apply_mixin_override() {
   local runtime_file="$1"
   local mixin_file_path
-  mixin_file_path="$(mixin_file)"
+  mixin_file_path="$(mixin_read_file)"
 
   [ -s "$runtime_file" ] || die "运行配置不存在：$runtime_file"
   [ -f "$mixin_file_path" ] || return 0
@@ -1998,7 +2062,7 @@ apply_mixin_override() {
 apply_mixin_prepend_arrays() {
   local runtime_file="$1"
   local mixin_file_path
-  mixin_file_path="$(mixin_file)"
+  mixin_file_path="$(mixin_read_file)"
 
   [ -s "$runtime_file" ] || die "运行配置不存在：$runtime_file"
   [ -f "$mixin_file_path" ] || return 0
@@ -2014,7 +2078,7 @@ apply_mixin_prepend_arrays() {
 apply_mixin_append_arrays() {
   local runtime_file="$1"
   local mixin_file_path
-  mixin_file_path="$(mixin_file)"
+  mixin_file_path="$(mixin_read_file)"
 
   [ -s "$runtime_file" ] || die "运行配置不存在：$runtime_file"
   [ -f "$mixin_file_path" ] || return 0
