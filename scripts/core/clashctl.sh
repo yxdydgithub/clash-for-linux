@@ -6260,12 +6260,13 @@ proxy_pick_index() {
 
 proxy_pick_group_interactive() {
   local idx count group current
-  local -a groups ordered_groups
+  local -a groups=()
+  local -a ordered_groups=()
 
   while IFS= read -r group; do
     [ -n "${group:-}" ] || continue
     groups+=("$group")
-  done < <(proxy_group_list)
+  done < <(proxy_group_manual_list)
 
   for group in "节点选择" "自动选择"; do
     if printf '%s\n' "${groups[@]}" | grep -Fxq "$group"; then
@@ -6409,7 +6410,7 @@ cmd_sub() {
 proxy_select_interactive() {
   local group="${1:-}"
   local current idx count total_count node selected_node
-  local -a nodes
+  local -a nodes=()
 
   prepare
 
@@ -6424,6 +6425,8 @@ proxy_select_interactive() {
   if [ -z "${group:-}" ]; then
     ui_title "🚀 节点切换"
     group="$(proxy_pick_group_interactive)" || return 0
+  elif ! proxy_group_supports_manual_pick "$group"; then
+    die "该策略组不支持手动挑节点：$group"
   fi
 
   current="$(proxy_group_current "$group" 2>/dev/null || true)"
