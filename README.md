@@ -235,7 +235,7 @@ Control 层负责把常用动作收口成可理解的命令和反馈。
 - 单 active 主订阅
 - active-only 编译链
 - 订阅下载 / 转换 / 校验
-- `config/mixin.yaml` 运行补丁
+- `runtime/mixin.yaml` 运行补丁（兼容读取 `config/mixin.yaml`）
 - 输出 `runtime/config.yaml`
 
 当前规则很明确：`generate_config` 只处理当前 active 主订阅。
@@ -307,7 +307,7 @@ resources/geo/Country.mmdb
 
 也可以设置 `CLASH_BUNDLED_ASSET_ENABLED=false` 强制跳过内置文件，或用 `CLASH_BUNDLED_ASSET_DIR=/path/to/assets` 指向项目外的资源目录。Mihomo、yq、subconverter 兼容旧路径 `resources/bin/<category>/<version>/<file>`。
 
-### `config/mixin.yaml`
+### `runtime/mixin.yaml`（兼容 `config/mixin.yaml`）
 
 用于对最终运行配置做补丁：
 
@@ -359,7 +359,7 @@ clashctl mixin raw
 clashctl mixin runtime
 ```
 
-Mixin 是运行配置补丁，不是订阅管理。它通过 `config/mixin.yaml` 对当前 active 订阅生成的运行配置执行：
+Mixin 是运行配置补丁，不是订阅管理。它优先通过 `runtime/mixin.yaml`（兼容读取 `config/mixin.yaml`）对当前 active 订阅生成的运行配置执行：
 
 - `override`
 - `prepend`
@@ -395,7 +395,7 @@ clashctl mixin edit
 
 ### 多跳节点
 
-多跳节点会写入 `config/mixin.yaml`，通过 Mihomo/Clash 的 `relay` 策略组串联已有订阅节点。节点名称必须与订阅生成的节点名完全一致，可先通过 Web 控制台确认：
+多跳节点会写入 `runtime/mixin.yaml`（兼容读取 `config/mixin.yaml`），通过 Mihomo/Clash 的 `relay` 策略组串联已有订阅节点。节点名称必须与订阅生成的节点名完全一致，可先通过 Web 控制台确认：
 
 ```bash
 clashon

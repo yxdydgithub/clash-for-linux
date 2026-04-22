@@ -3829,7 +3829,8 @@ cmd_profile() {
 }
 
 mixin_config_file() {
-  echo "$CONFIG_DIR/mixin.yaml"
+  ensure_mixin_file
+  echo "$(mixin_file)"
 }
 
 active_subscription_runtime_raw_file() {
@@ -4284,7 +4285,7 @@ cmd_relay() {
       echo "  clashctl relay add 全局多跳 节点A 节点B --match"
       echo
       echo "说明："
-      echo "  add 会写入 config/mixin.yaml，并重新生成运行配置"
+      echo "  add 会写入 runtime/mixin.yaml（兼容读取 config/mixin.yaml），并重新生成运行配置"
       echo "  --domain 用于小范围测试，--match 会让所有未提前命中的流量走多跳"
       echo "  节点名称必须与订阅生成的节点名完全一致"
       ;;
