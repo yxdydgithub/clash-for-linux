@@ -554,6 +554,22 @@ status_tun_last_verify_time() {
   read_tun_last_verify_time 2>/dev/null || true
 }
 
+status_tun_last_action() {
+  read_tun_last_action 2>/dev/null || true
+}
+
+status_tun_last_action_result() {
+  read_tun_last_action_result 2>/dev/null || true
+}
+
+status_tun_last_action_reason() {
+  read_tun_last_action_reason 2>/dev/null || true
+}
+
+status_tun_last_action_time() {
+  read_tun_last_action_time 2>/dev/null || true
+}
+
 status_tun_effective_status() {
   local enabled result
 
@@ -1730,6 +1746,7 @@ status_risk_reason_lines() {
   local build_block_reason build_block_time
   local fallback_used fallback_time fallback_reason
   local tun_enabled tun_effective tun_container_mode tun_kernel_support tun_verify_reason
+  local tun_action_result tun_action_reason tun_action_time
   local bind_failure_text mixed_port
 
   build_status="$(status_build_last_status 2>/dev/null || true)"
@@ -1749,6 +1766,9 @@ status_risk_reason_lines() {
   tun_container_mode="$(status_tun_container_mode 2>/dev/null || echo unknown)"
   tun_kernel_support="$(status_tun_kernel_support_level 2>/dev/null || echo unknown)"
   tun_verify_reason="$(status_tun_last_verify_reason 2>/dev/null || true)"
+  tun_action_result="$(status_tun_last_action_result 2>/dev/null || true)"
+  tun_action_reason="$(status_tun_last_action_reason 2>/dev/null || true)"
+  tun_action_time="$(status_tun_last_action_time 2>/dev/null || true)"
 
   if ! status_is_running; then
     if [ -n "${bind_failure_text:-}" ]; then
@@ -1795,6 +1815,14 @@ status_risk_reason_lines() {
 
   if [ -n "${last_risk_name:-}" ] && [ "${last_risk_reason:-}" = "fail-threshold-reached" ]; then
     echo "• 订阅 ${last_risk_name} 连续失败 ${last_risk_fail_count:-?} 次（阈值 ${last_risk_threshold:-?}）"
+  fi
+
+  if [ "${tun_action_result:-}" = "failed" ]; then
+    if [ -n "${tun_action_time:-}" ]; then
+      echo "• 最近一次 Tun 配置同步失败：${tun_action_reason:-unknown} @ ${tun_action_time}"
+    else
+      echo "• 最近一次 Tun 配置同步失败：${tun_action_reason:-unknown}"
+    fi
   fi
 
   if [ "$tun_enabled" = "true" ] && [ "$tun_effective" != "effective" ]; then
@@ -4698,8 +4726,9 @@ cmd_tun_on() {
       ;;
   esac
 
-  set_tun_enabled "true"
-  regenerate_config
+  if ! sync_tun_target_state "on" "true"; then
+    return 1
+  fi
 
   if status_is_running; then
     service_restart
@@ -4732,8 +4761,9 @@ cmd_tun_off() {
 
   prepare
 
-  set_tun_enabled "false"
-  regenerate_config
+  if ! sync_tun_target_state "off" "false"; then
+    return 1
+  fi
 
   if status_is_running; then
     service_restart
@@ -5607,10 +5637,14 @@ tun_problem_lines() {
   local enabled env_type config_tun_enabled auto_route
   local effective_result disable_result route_dev
   local container_mode risk_reason
+  local last_action_result last_action_reason last_action_time
   local kernel_support
   kernel_support="$(tun_kernel_support_level 2>/dev/null || echo unknown)"
   container_mode="$(tun_container_mode 2>/dev/null || echo unknown)"
   risk_reason="$(tun_container_risk_reason 2>/dev/null || true)"
+  last_action_result="$(status_tun_last_action_result 2>/dev/null || true)"
+  last_action_reason="$(status_tun_last_action_reason 2>/dev/null || true)"
+  last_action_time="$(status_tun_last_action_time 2>/dev/null || true)"
 
   enabled="$(tun_enabled 2>/dev/null || echo false)"
   env_type="$(container_env_type 2>/dev/null || echo unknown)"
@@ -5657,6 +5691,14 @@ tun_problem_lines() {
       ;;
   esac
 
+  if [ "${last_action_result:-}" = "failed" ]; then
+    if [ -n "${last_action_time:-}" ]; then
+      echo "• 最近一次 Tun 配置同步失败：${last_action_reason:-unknown} @ ${last_action_time}"
+    else
+      echo "• 最近一次 Tun 配置同步失败：${last_action_reason:-unknown}"
+    fi
+  fi
+
   if ! runtime_config_exists 2>/dev/null; then
     echo "• 运行时配置不存在"
     return 0
@@ -5691,6 +5733,37 @@ tun_problem_lines() {
       echo "• Tun 当前虽为关闭态，但仍存在残留：${disable_result:-unknown}"
     fi
   fi
+}
+
+sync_tun_target_state() {
+  local action="$1"
+  local target="$2"
+  local previous sync_output rc error_summary
+
+  previous="$(tun_enabled 2>/dev/null || echo false)"
+  set_tun_enabled "$target"
+
+  if sync_output="$(regenerate_config 2>&1)"; then
+    return 0
+  fi
+
+  rc=$?
+  set_tun_enabled "$previous"
+
+  error_summary="$(build_last_error_summary 2>/dev/null || true)"
+  if [ -z "${error_summary:-}" ]; then
+    error_summary="$(printf '%s\n' "$sync_output" | sed '/^[[:space:]]*$/d' | tail -n 1)"
+  fi
+  error_summary="$(single_line_text "${error_summary:-配置重建失败}")"
+  [ -n "${error_summary:-}" ] || error_summary="配置重建失败"
+
+  mark_tun_last_action "$action" "failed" "$error_summary"
+  mark_tun_last_verification "failed" "config-sync-failed"
+
+  ui_error "Tun 配置同步失败，已回滚状态文件"
+  ui_error "$error_summary"
+  ui_next "clashctl tun doctor"
+  return "$rc"
 }
 
 cmd_tun() {

@@ -17,11 +17,13 @@ clear_compile_error() {
 
 write_compile_error() {
   local message="$1"
+  mkdir -p "$(config_tmp_dir)"
   printf '%s\n' "$message" > "$(compile_error_file)"
 }
 
 append_compile_error() {
   local message="$1"
+  mkdir -p "$(config_tmp_dir)"
   printf '%s\n' "$message" >> "$(compile_error_file)"
 }
 
@@ -34,6 +36,46 @@ read_compile_error() {
 
 single_line_text() {
   printf '%s' "$1" | tr '\n' ' ' | sed 's/[[:space:]]\+/ /g; s/^ //; s/ $//'
+}
+
+display_config_path() {
+  local path="$1"
+
+  if [ -n "${PROJECT_DIR:-}" ] && [ "${path#"$PROJECT_DIR"/}" != "$path" ]; then
+    printf '%s\n' "${path#"$PROJECT_DIR"/}"
+    return 0
+  fi
+
+  printf '%s\n' "$path"
+}
+
+write_compile_error_with_detail() {
+  local summary="$1"
+  local file="${2:-}"
+  local detail="${3:-}"
+
+  write_compile_error "$summary"
+  [ -n "${file:-}" ] && append_compile_error "file   : $(display_config_path "$file")"
+  [ -n "${detail:-}" ] && append_compile_error "detail : $(single_line_text "$detail")"
+}
+
+validate_yaml_file_or_record() {
+  local file="$1"
+  local summary="$2"
+  local err_file output
+
+  [ -s "$file" ] || return 1
+
+  err_file="$(mktemp)"
+  if "$(yq_bin)" eval '.' "$file" >/dev/null 2>"$err_file"; then
+    rm -f "$err_file" 2>/dev/null || true
+    return 0
+  fi
+
+  output="$(cat "$err_file" 2>/dev/null || true)"
+  rm -f "$err_file" 2>/dev/null || true
+  write_compile_error_with_detail "$summary" "$file" "$output"
+  return 1
 }
 
 record_build_error_detail() {
@@ -654,7 +696,7 @@ normalize_runtime_config() {
   local mixed_port controller tun_enable_value tun_stack_value dns_port_value controller_secret_value
   local tun_auto_route_value tun_auto_redirect_value tun_strict_route_value tun_dns_hijack_value
   local dashboard_dir_value
-  local resolved_ports
+  local resolved_ports err_file output
 
   [ -s "$file" ] || die "待规范化的配置文件不存在：$file"
 
@@ -673,44 +715,52 @@ normalize_runtime_config() {
   controller_secret_value="$(ensure_controller_secret)"
   dashboard_dir_value="$(runtime_dashboard_dir)"
 
-  mixed_port="$mixed_port" \
-  controller="$controller" \
-  tun_enable_value="$tun_enable_value" \
-  tun_stack_value="$tun_stack_value" \
-  tun_auto_route_value="$tun_auto_route_value" \
-  tun_auto_redirect_value="$tun_auto_redirect_value" \
-  tun_strict_route_value="$tun_strict_route_value" \
-  tun_dns_hijack_value="$tun_dns_hijack_value" \
-  controller_secret_value="$controller_secret_value" \
-  dashboard_dir_value="$dashboard_dir_value" \
-  dns_listen_value="0.0.0.0:${dns_port_value}" \
-  "$(yq_bin)" eval -i '
-    .["mixed-port"] = (env(mixed_port) | tonumber) |
-    .["external-controller"] = env(controller) |
-    .secret = env(controller_secret_value) |
-    .["external-ui"] = env(dashboard_dir_value) |
-    .["external-ui-url"] = "/ui" |
-    .["allow-lan"] = (.["allow-lan"] // true) |
-    .mode = "rule" |
-    .["log-level"] = (.["log-level"] // "info") |
+  err_file="$(mktemp)"
+  if ! mixed_port="$mixed_port" \
+    controller="$controller" \
+    tun_enable_value="$tun_enable_value" \
+    tun_stack_value="$tun_stack_value" \
+    tun_auto_route_value="$tun_auto_route_value" \
+    tun_auto_redirect_value="$tun_auto_redirect_value" \
+    tun_strict_route_value="$tun_strict_route_value" \
+    tun_dns_hijack_value="$tun_dns_hijack_value" \
+    controller_secret_value="$controller_secret_value" \
+    dashboard_dir_value="$dashboard_dir_value" \
+    dns_listen_value="0.0.0.0:${dns_port_value}" \
+    "$(yq_bin)" eval -i '
+      .["mixed-port"] = (env(mixed_port) | tonumber) |
+      .["external-controller"] = env(controller) |
+      .secret = env(controller_secret_value) |
+      .["external-ui"] = env(dashboard_dir_value) |
+      .["external-ui-url"] = "/ui" |
+      .["allow-lan"] = (.["allow-lan"] // true) |
+      .mode = "rule" |
+      .["log-level"] = (.["log-level"] // "info") |
 
-    .tun.enable = (env(tun_enable_value) == "true") |
-    .tun.stack = env(tun_stack_value) |
-    .tun["auto-route"] = (env(tun_auto_route_value) == "true") |
-    .tun["auto-detect-interface"] = (.tun["auto-detect-interface"] // true) |
-    .tun["auto-redirect"] = (env(tun_auto_redirect_value) == "true") |
-    .tun["strict-route"] = (env(tun_strict_route_value) == "true") |
-    .tun["dns-hijack"] = (env(tun_dns_hijack_value) | split(",") | map(select(. != ""))) |
+      .tun.enable = (env(tun_enable_value) == "true") |
+      .tun.stack = env(tun_stack_value) |
+      .tun["auto-route"] = (env(tun_auto_route_value) == "true") |
+      .tun["auto-detect-interface"] = (.tun["auto-detect-interface"] // true) |
+      .tun["auto-redirect"] = (env(tun_auto_redirect_value) == "true") |
+      .tun["strict-route"] = (env(tun_strict_route_value) == "true") |
+      .tun["dns-hijack"] = (env(tun_dns_hijack_value) | split(",") | map(select(. != ""))) |
 
-    .dns.enable = (.dns.enable // true) |
-    .dns["enhanced-mode"] = (.dns["enhanced-mode"] // "fake-ip") |
-    .dns.ipv6 = false |
-    .dns.listen = env(dns_listen_value) |
+      .dns.enable = (.dns.enable // true) |
+      .dns["enhanced-mode"] = (.dns["enhanced-mode"] // "fake-ip") |
+      .dns.ipv6 = false |
+      .dns.listen = env(dns_listen_value) |
 
-    .proxies = (.proxies // []) |
-    .["proxy-groups"] = (.["proxy-groups"] // []) |
-    .rules = (.rules // [])
-  ' "$file"
+      .proxies = (.proxies // []) |
+      .["proxy-groups"] = (.["proxy-groups"] // []) |
+      .rules = (.rules // [])
+    ' "$file" 2>"$err_file"; then
+    output="$(cat "$err_file" 2>/dev/null || true)"
+    rm -f "$err_file" 2>/dev/null || true
+    write_compile_error_with_detail "其他运行配置 YAML 解析失败：$(display_config_path "$file")" "$file" "$output"
+    return 1
+  fi
+
+  rm -f "$err_file" 2>/dev/null || true
 }
 
 generate_secure_secret() {
@@ -2093,19 +2143,48 @@ apply_mixin_append_arrays() {
 
 apply_runtime_mixin() {
   local runtime_file="$1"
+  local mixin_file_path
 
   [ -s "$runtime_file" ] || die "待应用 mixin 的配置文件不存在：$runtime_file"
 
   ensure_mixin_file
+  mixin_file_path="$(mixin_read_file)"
+  [ -f "$mixin_file_path" ] || return 0
+
+  validate_yaml_file_or_record "$mixin_file_path" "$(display_config_path "$mixin_file_path") 解析失败" || return 1
 
   build_debug "mixin: override"
-  apply_mixin_override "$runtime_file"
+  if ! apply_mixin_override "$runtime_file" 2>"$(config_tmp_dir)/mixin-override.err"; then
+    write_compile_error_with_detail \
+      "其他运行配置 YAML 解析失败：$(display_config_path "$runtime_file")" \
+      "$runtime_file" \
+      "mixin override: $(cat "$(config_tmp_dir)/mixin-override.err" 2>/dev/null || true)"
+    rm -f "$(config_tmp_dir)/mixin-override.err" 2>/dev/null || true
+    return 1
+  fi
+  rm -f "$(config_tmp_dir)/mixin-override.err" 2>/dev/null || true
 
   build_debug "mixin: prepend"
-  apply_mixin_prepend_arrays "$runtime_file"
+  if ! apply_mixin_prepend_arrays "$runtime_file" 2>"$(config_tmp_dir)/mixin-prepend.err"; then
+    write_compile_error_with_detail \
+      "其他运行配置 YAML 解析失败：$(display_config_path "$runtime_file")" \
+      "$runtime_file" \
+      "mixin prepend: $(cat "$(config_tmp_dir)/mixin-prepend.err" 2>/dev/null || true)"
+    rm -f "$(config_tmp_dir)/mixin-prepend.err" 2>/dev/null || true
+    return 1
+  fi
+  rm -f "$(config_tmp_dir)/mixin-prepend.err" 2>/dev/null || true
 
   build_debug "mixin: append"
-  apply_mixin_append_arrays "$runtime_file"
+  if ! apply_mixin_append_arrays "$runtime_file" 2>"$(config_tmp_dir)/mixin-append.err"; then
+    write_compile_error_with_detail \
+      "其他运行配置 YAML 解析失败：$(display_config_path "$runtime_file")" \
+      "$runtime_file" \
+      "mixin append: $(cat "$(config_tmp_dir)/mixin-append.err" 2>/dev/null || true)"
+    rm -f "$(config_tmp_dir)/mixin-append.err" 2>/dev/null || true
+    return 1
+  fi
+  rm -f "$(config_tmp_dir)/mixin-append.err" 2>/dev/null || true
 }
 
 show_subscription() {
@@ -3042,16 +3121,19 @@ stop_subconverter() {
 
 subscription_yaml_validate() {
   local file="$1"
+  local source_name="${2:-当前活动订阅}"
+  local err_file output
 
   [ -s "$file" ] || return 1
 
   # 先做一次最小 YAML 解析校验
-  if ! "$(yq_bin)" eval '.' "$file" >/dev/null 2>&1; then
+  if ! validate_yaml_file_or_record "$file" "活动订阅 YAML 解析失败：$source_name"; then
     return 1
   fi
 
   # 再做一次 Clash/Mihomo 订阅的基本结构校验
   # 允许是完整配置，也允许是仅包含 proxies / proxy-groups / rules / rule-providers 的订阅
+  err_file="$(mktemp)"
   if ! "$(yq_bin)" eval '
     (
       (.proxies != null) or
@@ -3062,9 +3144,20 @@ subscription_yaml_validate() {
       (.port != null) or
       (.mode != null)
     )
-  ' "$file" 2>/dev/null | grep -qx 'true'; then
+  ' "$file" 2>"$err_file" | grep -qx 'true'; then
+    output="$(cat "$err_file" 2>/dev/null || true)"
+    rm -f "$err_file" 2>/dev/null || true
+    if [ -n "${output:-}" ]; then
+      write_compile_error_with_detail "活动订阅 YAML 解析失败：$source_name" "$file" "$output"
+    else
+      write_compile_error_with_detail \
+        "活动订阅 YAML 非法：$source_name" \
+        "$file" \
+        "缺少 Clash/Mihomo 基本字段（proxies、proxy-groups、rules、rule-providers、mixed-port、port、mode）"
+    fi
     return 1
   fi
+  rm -f "$err_file" 2>/dev/null || true
 
   return 0
 }
@@ -3667,9 +3760,10 @@ resolve_build_sources() {
 build_runtime_candidate_from_payload() {
   local payload_file="$1"
   local out_file="$2"
+  local source_name="${3:-当前活动订阅}"
 
   [ -s "$payload_file" ] || return 1
-  subscription_yaml_validate "$payload_file" || return 1
+  subscription_yaml_validate "$payload_file" "$source_name" || return 1
 
   cp -f "$payload_file" "$out_file"
   normalize_runtime_config "$out_file"
@@ -3710,7 +3804,7 @@ fetch_subscription_source() {
       esac
 
       if download_subscription_yaml "$url" "$raw_file" "$fetch_reason"; then
-        if build_runtime_candidate_from_payload "$raw_file" "$candidate_file"; then
+        if build_runtime_candidate_from_payload "$raw_file" "$candidate_file" "$name"; then
           mv -f "$candidate_file" "$out_file"
           rm -f "$raw_file" 2>/dev/null || true
           mark_subscription_health_success "$name"
@@ -3724,7 +3818,7 @@ fetch_subscription_source() {
         rm -f "$candidate_file" 2>/dev/null || true
 
         if convert_subscription_via_subconverter "$url" "$raw_file" "$fetch_reason" "direct-clash-invalid"; then
-          if build_runtime_candidate_from_payload "$raw_file" "$candidate_file"; then
+          if build_runtime_candidate_from_payload "$raw_file" "$candidate_file" "$name"; then
             mv -f "$candidate_file" "$out_file"
             rm -f "$raw_file" 2>/dev/null || true
             mark_subscription_health_success "$name"
@@ -3748,7 +3842,7 @@ fetch_subscription_source() {
             rm -f "$raw_file" "$candidate_file" 2>/dev/null || true
 
             if download_subscription_yaml "$url" "$raw_file" "$fetch_reason"; then
-              if build_runtime_candidate_from_payload "$raw_file" "$candidate_file"; then
+              if build_runtime_candidate_from_payload "$raw_file" "$candidate_file" "$name"; then
                 mv -f "$candidate_file" "$out_file"
                 rm -f "$raw_file" 2>/dev/null || true
                 mark_subscription_health_success "$name"
@@ -3781,7 +3875,7 @@ fetch_subscription_source() {
       esac
 
       if convert_subscription_via_subconverter "$url" "$raw_file" "$fetch_reason" "subscription-type-convert"; then
-        if build_runtime_candidate_from_payload "$raw_file" "$candidate_file"; then
+        if build_runtime_candidate_from_payload "$raw_file" "$candidate_file" "$name"; then
           mv -f "$candidate_file" "$out_file"
           rm -f "$raw_file" 2>/dev/null || true
           mark_subscription_health_success "$name"
@@ -3801,7 +3895,7 @@ fetch_subscription_source() {
           rm -f "$raw_file" "$candidate_file" 2>/dev/null || true
 
           if download_subscription_yaml "$url" "$raw_file" "$fetch_reason"; then
-            if build_runtime_candidate_from_payload "$raw_file" "$candidate_file"; then
+            if build_runtime_candidate_from_payload "$raw_file" "$candidate_file" "$name"; then
               mv -f "$candidate_file" "$out_file"
               rm -f "$raw_file" 2>/dev/null || true
               mark_subscription_health_success "$name"
@@ -3829,16 +3923,18 @@ fetch_subscription_source() {
 generate_config() {
   local active_source
   local out_file="$RUNTIME_DIR/config.yaml"
-  local tmp_dir source_file
+  local tmp_dir source_file candidate_file
   local selected_csv="" included_csv="" failed_csv=""
 
   ensure_active_subscription_usable || true
+  clear_compile_error
 
   active_source="$(active_subscription_name 2>/dev/null || true)"
 
   mkdir -p "$RUNTIME_DIR" "$(config_tmp_dir)"
   tmp_dir="$(config_tmp_dir)"
   source_file="$tmp_dir/source-${active_source}.yaml"
+  candidate_file="$tmp_dir/runtime-candidate-${active_source}.yaml"
 
   if [ -z "${active_source:-}" ] || ! subscription_exists "$active_source" || ! subscription_enabled "$active_source"; then
     write_compile_error "当前没有可用主订阅"
@@ -3857,12 +3953,14 @@ generate_config() {
 
   if ! fetch_subscription_source "$active_source" "$source_file" "auto"; then
     failed_csv="$active_source"
-    if [ -n "${SUBCONVERTER_LAST_ERROR_SUMMARY:-}" ]; then
-      write_compile_error "当前主订阅不可用：$active_source"
-      append_compile_error "reason : $SUBCONVERTER_LAST_ERROR_SUMMARY"
-    else
-      write_compile_error "当前主订阅不可用"
-      append_compile_error "source : $active_source"
+    if ! read_compile_error >/dev/null 2>&1; then
+      if [ -n "${SUBCONVERTER_LAST_ERROR_SUMMARY:-}" ]; then
+        write_compile_error "当前主订阅不可用：$active_source"
+        append_compile_error "reason : $SUBCONVERTER_LAST_ERROR_SUMMARY"
+      else
+        write_compile_error "当前主订阅不可用"
+        append_compile_error "source : $active_source"
+      fi
     fi
     fail_build_with_detail \
       "fetch-source" \
@@ -3877,8 +3975,20 @@ generate_config() {
 
   included_csv="$active_source"
 
-  cp -f "$source_file" "$out_file"
-  apply_runtime_mixin "$out_file"
+  cp -f "$source_file" "$candidate_file"
+  if ! apply_runtime_mixin "$candidate_file"; then
+    rm -f "$candidate_file" 2>/dev/null || true
+    fail_build_with_detail \
+      "apply-runtime-mixin" \
+      "single" \
+      "active-only" \
+      "$active_source" \
+      "$selected_csv" \
+      "$included_csv" \
+      "$failed_csv" \
+      "运行配置生成失败：mixin 应用失败"
+  fi
+  mv -f "$candidate_file" "$out_file"
   cp -f "$out_file" "$RUNTIME_DIR/config.last.yaml"
   save_build_stage_snapshot "active-source-ready" "$source_file"
 
