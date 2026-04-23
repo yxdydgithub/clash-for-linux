@@ -6191,7 +6191,7 @@ cmd_select() {
 
   if [ -z "${1:-}" ]; then
     print_select_context || return $?
-    proxy_select_interactive
+    proxy_select_interactive_guarded
     return 0
   fi
 
@@ -6217,7 +6217,7 @@ cmd_proxy_groups() {
     [ -n "${group:-}" ] || continue
     found="true"
     type="$(proxy_group_type "$group" 2>/dev/null || echo "unknown")"
-    current="$(proxy_group_current "$group" 2>/dev/null || echo "-")"
+    current="$(proxy_group_current "$group" 2>/dev/null || true)"
     printf '  📦 %-20s %-12s %s\n' "$group" "$type" "$current"
   done < <(proxy_group_list)
 
@@ -6333,14 +6333,14 @@ proxy_pick_index() {
 }
 
 proxy_pick_group_interactive() {
-  local idx count group current
+  local idx count group current type
   local -a groups=()
   local -a ordered_groups=()
 
   while IFS= read -r group; do
     [ -n "${group:-}" ] || continue
     groups+=("$group")
-  done < <(proxy_group_manual_list)
+  done < <(proxy_group_display_list)
 
   for group in "节点选择" "自动选择"; do
     if printf '%s\n' "${groups[@]}" | grep -Fxq "$group"; then
@@ -6501,6 +6501,139 @@ proxy_select_interactive() {
     group="$(proxy_pick_group_interactive)" || return 0
   elif ! proxy_group_supports_manual_pick "$group"; then
     die "该策略组不支持手动挑节点：$group"
+  fi
+
+  current="$(proxy_group_current "$group" 2>/dev/null || true)"
+
+  while IFS= read -r node; do
+    [ -n "${node:-}" ] || continue
+    nodes+=("$node")
+  done < <(proxy_group_selectable_nodes "$group")
+
+  count="${#nodes[@]}"
+  [ "$count" -gt 0 ] || die "📭 当前策略组没有候选节点：$group"
+  total_count="$(select_total_node_count 2>/dev/null || true)"
+
+  echo
+  echo "📦 当前策略组：$group"
+  [ -n "${current:-}" ] && echo "🚀 当前节点：$current"
+  echo "📦 当前策略组候选数：$count"
+  [ -n "${total_count:-}" ] && echo "🔢 全部节点总数：$total_count"
+  echo "ℹ️ 以下仅显示当前策略组可切换节点"
+  echo
+  echo "🚀 请选择节点："
+
+  idx=1
+  for node in "${nodes[@]}"; do
+    if [ "$node" = "$current" ]; then
+      printf '  %s) 🚀 %s [当前]\n' "$idx" "$node"
+    else
+      printf '  %s) 🚀 %s\n' "$idx" "$node"
+    fi
+    idx=$((idx + 1))
+  done
+
+  echo "  q) 退出"
+  echo
+
+  idx="$(proxy_pick_index "$count")" || return 0
+  selected_node="${nodes[$((idx - 1))]}"
+
+  proxy_group_select "$group" "$selected_node"
+  print_select_feedback "$group"
+}
+
+proxy_pick_group_for_select() {
+  local idx count group current type
+  local -a groups=()
+  local -a ordered_groups=()
+
+  while IFS= read -r group; do
+    [ -n "${group:-}" ] || continue
+    groups+=("$group")
+  done < <(proxy_group_display_list)
+
+  for group in "节点选择" "自动选择"; do
+    if printf '%s\n' "${groups[@]}" | grep -Fxq "$group"; then
+      ordered_groups+=("$group")
+    fi
+  done
+
+  for group in "${groups[@]}"; do
+    case "$group" in
+      节点选择|自动选择)
+        continue
+        ;;
+    esac
+    ordered_groups+=("$group")
+  done
+
+  groups=("${ordered_groups[@]}")
+
+  count="${#groups[@]}"
+  [ "$count" -gt 0 ] || die "📭 暂无可切换策略组"
+
+  echo "📦 请选择策略组：" >&2
+  echo "💡 通常优先选择：节点选择" >&2
+  idx=1
+  for group in "${groups[@]}"; do
+    current="$(proxy_group_current "$group" 2>/dev/null || true)"
+    type="$(proxy_group_type_label "$group" 2>/dev/null || echo "unknown")"
+    [ -n "${current:-}" ] || current="<unknown>"
+    printf '  %s) 📦 %s [%s]  ->  🚀 %s\n' "$idx" "$group" "$type" "$current" >&2
+    idx=$((idx + 1))
+  done
+  echo "  q) 退出" >&2
+  echo >&2
+
+  idx="$(proxy_pick_index "$count")" || return 1
+  echo "${groups[$((idx - 1))]}"
+}
+
+print_proxy_group_manual_pick_blocked() {
+  local group="$1"
+  local current type message
+
+  message="$(proxy_group_manual_pick_error_message "$group" 2>/dev/null || echo "该策略组不支持手动切换：$group")"
+  current="$(proxy_group_current "$group" 2>/dev/null || true)"
+  type="$(proxy_group_type_label "$group" 2>/dev/null || echo "unknown")"
+
+  ui_warn "$message"
+  ui_kv "📦" "策略组" "$group"
+  ui_kv "🧭" "策略组类型" "$type"
+  if [ -n "${current:-}" ]; then
+    ui_kv "🚀" "当前节点" "$current"
+  else
+    ui_kv "🚀" "当前节点" "<unknown>"
+  fi
+  ui_blank
+}
+
+proxy_select_interactive_guarded() {
+  local group="${1:-}"
+  local current idx count total_count node selected_node
+  local -a nodes=()
+
+  prepare
+
+  if ! status_is_running; then
+    die_state "代理内核未运行" "clashon"
+  fi
+
+  if ! proxy_controller_reachable 2>/dev/null; then
+    die_state "控制器不可访问" "clashctl doctor"
+  fi
+
+  if [ -z "${group:-}" ]; then
+    ui_title "🚀 节点切换"
+    group="$(proxy_pick_group_for_select)" || return 0
+  fi
+
+  proxy_group_exists "$group" || die "策略组不存在：$group"
+
+  if ! proxy_group_supports_manual_pick "$group"; then
+    print_proxy_group_manual_pick_blocked "$group"
+    return 0
   fi
 
   current="$(proxy_group_current "$group" 2>/dev/null || true)"

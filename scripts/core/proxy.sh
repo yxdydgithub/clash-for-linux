@@ -278,13 +278,50 @@ proxy_group_type() {
   proxy_groups_json | "$(yq_bin)" -p=json eval ".proxies.\"$group\".type // \"\"" - 2>/dev/null
 }
 
-proxy_group_is_selector() {
+proxy_group_type_key() {
   local type
 
-  type="$(proxy_group_type "$1")"
+  type="$(proxy_group_type "$1" 2>/dev/null || true)"
+  printf '%s' "${type:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]_-'
+}
 
-  case "$type" in
-    Selector|URLTest|Fallback|LoadBalance)
+proxy_group_type_label() {
+  local group="$1"
+  local type_key raw_type
+
+  type_key="$(proxy_group_type_key "$group")"
+
+  case "$type_key" in
+    selector)
+      echo "select"
+      ;;
+    urltest)
+      echo "自动选择 / url-test"
+      ;;
+    fallback)
+      echo "故障转移 / fallback"
+      ;;
+    loadbalance)
+      echo "负载均衡 / load-balance"
+      ;;
+    *)
+      raw_type="$(proxy_group_type "$group" 2>/dev/null || true)"
+      if [ -n "${raw_type:-}" ] && [ "$raw_type" != "null" ]; then
+        echo "$raw_type"
+      else
+        echo "unknown"
+      fi
+      ;;
+  esac
+}
+
+proxy_group_can_show_candidates() {
+  local type_key
+
+  type_key="$(proxy_group_type_key "$1")"
+
+  case "$type_key" in
+    selector|urltest|fallback|loadbalance)
       return 0
       ;;
     *)
@@ -293,22 +330,25 @@ proxy_group_is_selector() {
   esac
 }
 
+proxy_group_is_selector() {
+  proxy_group_can_show_candidates "$1"
+}
+
 proxy_group_is_manual_selector() {
   proxy_group_supports_manual_pick "$1"
 }
 
 proxy_group_is_auto_managed() {
   local group="$1"
-  local type normalized_type
+  local type_key
 
   [ -n "${group:-}" ] || return 0
   proxy_group_exists "$group" || return 0
 
-  type="$(proxy_group_type "$group" 2>/dev/null || true)"
-  normalized_type="$(printf '%s' "${type:-}" | tr '[:upper:]' '[:lower:]')"
+  type_key="$(proxy_group_type_key "$group")"
 
-  case "$normalized_type" in
-    urltest|url-test|fallback|loadbalance|load-balance)
+  case "$type_key" in
+    urltest|fallback|loadbalance)
       return 0
       ;;
   esac
@@ -389,14 +429,54 @@ proxy_group_selectable_nodes() {
   done < <(proxy_group_nodes "$group")
 }
 
-proxy_group_supports_manual_pick() {
+proxy_group_has_selectable_candidates() {
   local group="$1"
   local node
-  local has_now=""
 
   [ -n "${group:-}" ] || return 1
   proxy_group_exists "$group" || return 1
-  proxy_group_is_auto_managed "$group" && return 1
+  proxy_group_can_show_candidates "$group" || return 1
+
+  while IFS= read -r node; do
+    [ -n "${node:-}" ] || continue
+    return 0
+  done < <(proxy_group_selectable_nodes "$group")
+
+  return 1
+}
+
+proxy_group_manual_pick_error_message() {
+  local group="$1"
+  local type_key type_label
+
+  [ -n "${group:-}" ] || {
+    echo "该策略组不支持手动切换"
+    return 0
+  }
+
+  type_key="$(proxy_group_type_key "$group")"
+  type_label="$(proxy_group_type_label "$group")"
+
+  case "$type_key" in
+    urltest|fallback|loadbalance)
+      echo "该策略组为${type_label}类型，不支持手动切换：$group"
+      ;;
+    *)
+      echo "该策略组不支持手动切换：$group"
+      ;;
+  esac
+}
+
+proxy_group_supports_manual_pick() {
+  local group="$1"
+  local has_now=""
+  local type_key
+
+  [ -n "${group:-}" ] || return 1
+  proxy_group_exists "$group" || return 1
+
+  type_key="$(proxy_group_type_key "$group")"
+  [ "$type_key" = "selector" ] || return 1
 
   has_now="$(
     proxy_groups_json \
@@ -405,12 +485,17 @@ proxy_group_supports_manual_pick() {
   )"
   [ "${has_now:-false}" = "true" ] || return 1
 
-  while IFS= read -r node; do
-    [ -n "${node:-}" ] || continue
-    return 0
-  done < <(proxy_group_selectable_nodes "$group")
+  proxy_group_has_selectable_candidates "$group"
+}
 
-  return 1
+proxy_group_display_list() {
+  local group
+
+  while IFS= read -r group; do
+    [ -n "${group:-}" ] || continue
+    proxy_group_has_selectable_candidates "$group" || continue
+    echo "$group"
+  done < <(proxy_group_list)
 }
 
 proxy_group_manual_list() {
@@ -435,6 +520,55 @@ proxy_group_select() {
 
   proxy_group_exists "$group" || die "策略组不存在：$group"
   proxy_group_supports_manual_pick "$group" || die "该策略组不支持手动切换：$group"
+
+  found=false
+  while IFS= read -r available_node; do
+    [ -n "${available_node:-}" ] || continue
+    if [ "$available_node" = "$node" ]; then
+      found=true
+      break
+    fi
+  done < <(proxy_group_selectable_nodes "$group")
+
+  if [ "$found" != "true" ]; then
+    die "节点不存在于策略组中：$group -> $node"
+  fi
+
+  base="$(controller_api_base)"
+  secret="$(controller_secret)"
+  response_file="$(mktemp)"
+  code="$(
+    curl -sS -o "$response_file" -w "%{http_code}" -X PUT \
+      -H "Content-Type: application/json" \
+      ${secret:+-H "Authorization: Bearer $secret"} \
+      --data "{\"name\":\"$node\"}" \
+      "$base/proxies/$group"
+  )"
+
+  if [ "${code:-000}" -lt 200 ] || [ "${code:-000}" -ge 300 ]; then
+    response_body="$(cat "$response_file" 2>/dev/null || true)"
+    rm -f "$response_file" 2>/dev/null || true
+    if [ -n "${response_body:-}" ]; then
+      die "节点切换失败：$response_body"
+    fi
+    die "节点切换失败：controller 返回 HTTP $code"
+  fi
+
+  rm -f "$response_file" 2>/dev/null || true
+}
+
+proxy_group_select() {
+  local group="$1"
+  local node="$2"
+  local base secret
+  local code response_file response_body
+  local available_node found
+
+  [ -n "${group:-}" ] || die "策略组名称不能为空"
+  [ -n "${node:-}" ] || die "节点名称不能为空"
+
+  proxy_group_exists "$group" || die "策略组不存在：$group"
+  proxy_group_supports_manual_pick "$group" || die "$(proxy_group_manual_pick_error_message "$group")"
 
   found=false
   while IFS= read -r available_node; do
