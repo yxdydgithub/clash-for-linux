@@ -741,3 +741,192 @@ print_proxy_groups_summary() {
     fi
   done < <(proxy_group_list)
 }
+
+proxy_node_match_key() {
+  local node="$1"
+
+  printf '%s' "${node:-}" \
+    | tr '[:upper:]' '[:lower:]' \
+    | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+}
+
+proxy_node_matches_descriptive_prefix() {
+  local node="$1"
+  local keyword="$2"
+
+  case "$node" in
+    "$keyword"|"$keyword:"*|"$keyword："*|"$keyword"[[:space:]]*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+proxy_node_is_descriptive_entry() {
+  local node="$1"
+  local match_key
+  local keyword
+
+  match_key="$(proxy_node_match_key "$node")"
+
+  case "$match_key" in
+    ""|null|空值|"<unknown>")
+      return 0
+      ;;
+  esac
+
+  for keyword in \
+    "剩余流量" \
+    "流量" \
+    "已用流量" \
+    "总流量" \
+    "套餐到期" \
+    "到期时间" \
+    "过期时间" \
+    "官网" \
+    "网址" \
+    "url" \
+    "expire" \
+    "traffic" \
+    "remaining" \
+    "used" \
+    "流量重置" \
+    "通知"; do
+    proxy_node_matches_descriptive_prefix "$match_key" "$keyword" && return 0
+  done
+
+  return 1
+}
+
+proxy_group_first_selectable_node() {
+  local group="$1"
+  local node
+
+  [ -n "${group:-}" ] || return 1
+  proxy_group_exists "$group" || return 1
+
+  while IFS= read -r node; do
+    [ -n "${node:-}" ] || continue
+    echo "$node"
+    return 0
+  done < <(proxy_group_selectable_nodes "$group")
+
+  return 1
+}
+
+proxy_group_current_display() {
+  local group="$1"
+  local current=""
+
+  [ -n "${group:-}" ] || return 1
+  proxy_group_exists "$group" || return 1
+
+  current="$(proxy_group_current "$group" 2>/dev/null || true)"
+  if [ -n "${current:-}" ] && proxy_node_is_selectable_candidate "$current"; then
+    echo "$current"
+    return 0
+  fi
+
+  proxy_group_first_selectable_node "$group"
+}
+
+proxy_group_display_list() {
+  local group
+
+  while IFS= read -r group; do
+    [ -n "${group:-}" ] || continue
+    proxy_group_can_show_candidates "$group" || continue
+    echo "$group"
+  done < <(proxy_group_list)
+}
+
+proxy_group_select() {
+  local group="$1"
+  local node="$2"
+  local base secret
+  local code response_file response_body
+  local available_node found
+
+  [ -n "${group:-}" ] || die "绛栫暐缁勫悕绉颁笉鑳戒负绌?"
+  [ -n "${node:-}" ] || die "鑺傜偣鍚嶇О涓嶈兘涓虹┖"
+
+  proxy_group_exists "$group" || die "绛栫暐缁勪笉瀛樺湪锛?group"
+  proxy_group_can_show_candidates "$group" || die "$(proxy_group_manual_pick_error_message "$group")"
+  proxy_node_is_selectable_candidate "$node" || die "节点不是可切换节点：$node"
+
+  found=false
+  while IFS= read -r available_node; do
+    [ -n "${available_node:-}" ] || continue
+    if [ "$available_node" = "$node" ]; then
+      found=true
+      break
+    fi
+  done < <(proxy_group_selectable_nodes "$group")
+
+  if [ "$found" != "true" ]; then
+    die "鑺傜偣涓嶅瓨鍦ㄤ簬绛栫暐缁勪腑锛?group -> $node"
+  fi
+
+  base="$(controller_api_base)"
+  secret="$(controller_secret)"
+  response_file="$(mktemp)"
+  code="$(
+    curl -sS -o "$response_file" -w "%{http_code}" -X PUT \
+      -H "Content-Type: application/json" \
+      ${secret:+-H "Authorization: Bearer $secret"} \
+      --data "{\"name\":\"$node\"}" \
+      "$base/proxies/$group"
+  )"
+
+  if [ "${code:-000}" -lt 200 ] || [ "${code:-000}" -ge 300 ]; then
+    response_body="$(cat "$response_file" 2>/dev/null || true)"
+    rm -f "$response_file" 2>/dev/null || true
+    if [ -n "${response_body:-}" ]; then
+      die "controller 原始错误：$response_body"
+    fi
+    die "鑺傜偣鍒囨崲澶辫触锛歝ontroller 杩斿洖 HTTP $code"
+  fi
+
+  rm -f "$response_file" 2>/dev/null || true
+}
+
+default_proxy_group_current() {
+  local group
+
+  group="$(default_proxy_group_name 2>/dev/null || true)"
+  [ -n "${group:-}" ] || return 1
+
+  proxy_group_current_display "$group" 2>/dev/null || return 1
+}
+
+print_proxy_groups_status() {
+  local group current
+
+  while IFS= read -r group; do
+    [ -n "${group:-}" ] || continue
+    current="$(proxy_group_current_display "$group" 2>/dev/null || true)"
+
+    if [ -n "${current:-}" ]; then
+      echo "$group -> $current"
+    else
+      echo "$group -> <unknown>"
+    fi
+  done < <(proxy_group_list)
+}
+
+print_proxy_groups_summary() {
+  local group current
+
+  while IFS= read -r group; do
+    [ -n "${group:-}" ] || continue
+    current="$(proxy_group_current_display "$group" 2>/dev/null || true)"
+
+    if [ -n "${current:-}" ]; then
+      echo "$group -> $current"
+    else
+      echo "$group"
+    fi
+  done < <(proxy_group_list)
+}
