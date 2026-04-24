@@ -1563,6 +1563,66 @@ print_config_kernel_feedback() {
   ui_blank
 }
 
+tun_container_runtime_hint_lines() {
+  local env_type os_variant cap_check printed="false"
+
+  env_type="$(container_env_type 2>/dev/null || echo unknown)"
+  os_variant="$(install_env_os_variant 2>/dev/null || true)"
+  cap_check="$(has_cap_net_admin; echo $?)"
+
+  if [ "$env_type" = "docker" ]; then
+    if ! tun_device_exists 2>/dev/null || [ "$cap_check" != "0" ]; then
+      echo "👉 当前问题来自容器启动参数；仅在容器内执行 sudo 或切换到 root，无法补齐缺失的 device / capability"
+      printed="true"
+    fi
+  fi
+
+  if ! tun_device_exists 2>/dev/null; then
+    if [ "$env_type" = "docker" ]; then
+      echo "👉 请重新创建 Docker 容器并挂载 Tun 设备：--device /dev/net/tun"
+    else
+      echo "👉 请在容器启动时映射 Tun 设备；Docker 示例：--device /dev/net/tun"
+    fi
+    printed="true"
+  fi
+
+  case "$cap_check" in
+    0)
+      ;;
+    2)
+      if [ "$env_type" = "docker" ]; then
+        echo "👉 当前容器内缺少 capsh，无法确认 CAP_NET_ADMIN；请重点检查启动参数是否包含：--cap-add NET_ADMIN"
+      else
+        echo "👉 无法确认 CAP_NET_ADMIN（缺少 capsh）；请检查容器启动参数是否授予了该 capability"
+      fi
+      printed="true"
+      ;;
+    *)
+      if [ "$env_type" = "docker" ]; then
+        echo "👉 请重新创建 Docker 容器并增加能力：--cap-add NET_ADMIN"
+      else
+        echo "👉 请在容器启动时授予网络管理能力；Docker 示例：--cap-add NET_ADMIN"
+      fi
+      printed="true"
+      ;;
+  esac
+
+  if ! has_ip_command 2>/dev/null; then
+    case "$os_variant" in
+      openwrt)
+        echo "👉 当前环境缺少 ip 命令；OpenWrt 可安装：opkg update && opkg install ip-full"
+        ;;
+      *)
+        echo "👉 当前环境缺少 ip 命令；Debian/Ubuntu 可安装：apt update && apt install -y iproute2"
+        echo "👉 其他发行版请安装提供 ip 命令的 iproute / iproute2 软件包"
+        ;;
+    esac
+    printed="true"
+  fi
+
+  [ "$printed" = "true" ]
+}
+
 print_tun_container_gate_feedback() {
   local mode="$1"
   local reason="${2:-}"
@@ -1587,7 +1647,8 @@ print_tun_container_gate_feedback() {
       ui_kv "💻" "环境模式" "容器环境"
       ui_kv "❗" "容器裁决" "高风险，已阻断开启"
       [ -n "${reason:-}" ] && ui_kv "❗" "阻断原因" "$reason"
-      ui_next "clashctl tun doctor"
+      tun_container_runtime_hint_lines | sed 's/^/  /' || true
+      ui_next "查看完整诊断：clashctl tun doctor"
       ui_blank
       ;;
     *)
@@ -5454,31 +5515,51 @@ tun_doctor_action_lines() {
 
   case "$reason" in
     missing-cap-net-admin)
-      case "$backend" in
-        systemd)
-          echo "👉 当前运行后端为 systemd；若关键证据显示 unit 未声明能力，可尝试为服务显式补 CAP_NET_ADMIN / CAP_NET_RAW："
-          echo "   sudo systemctl edit $unit"
-          ;;
-        systemd-user)
-          echo "👉 当前运行后端为 systemd-user；请结合容器与 unit 证据判断，必要时改用系统服务或显式补 CAP_NET_ADMIN / CAP_NET_RAW"
-          ;;
-        script)
-          echo "👉 当前运行后端为 script；请确认启动 mihomo 的实际进程具备 CAP_NET_ADMIN / CAP_NET_RAW："
-          echo "   sudo clashctl tun on"
-          ;;
-        *)
-          echo "👉 请结合运行后端、容器环境和进程能力证据，确认 mihomo 实际拥有 CAP_NET_ADMIN / CAP_NET_RAW"
-          ;;
-      esac
+      if [ "$(container_env_type 2>/dev/null || echo unknown)" != "host" ]; then
+        tun_container_runtime_hint_lines || true
+      else
+        case "$backend" in
+          systemd)
+            echo "👉 当前运行后端为 systemd；若关键证据显示 unit 未声明能力，可尝试为服务显式补 CAP_NET_ADMIN / CAP_NET_RAW："
+            echo "   sudo systemctl edit $unit"
+            ;;
+          systemd-user)
+            echo "👉 当前运行后端为 systemd-user；请结合容器与 unit 证据判断，必要时改用系统服务或显式补 CAP_NET_ADMIN / CAP_NET_RAW"
+            ;;
+          script)
+            echo "👉 当前运行后端为 script；请确认启动 mihomo 的实际进程具备 CAP_NET_ADMIN / CAP_NET_RAW"
+            echo "👉 若当前就是主机脚本模式，可尝试提升权限后重新执行：sudo clashctl tun on"
+            ;;
+          *)
+            echo "👉 请结合运行后端、容器环境和进程能力证据，确认 mihomo 实际拥有 CAP_NET_ADMIN / CAP_NET_RAW"
+            ;;
+        esac
+      fi
       ;;
     missing-tun-device)
-      echo "👉 请先挂载或启用 /dev/net/tun"
+      if [ "$(container_env_type 2>/dev/null || echo unknown)" != "host" ]; then
+        tun_container_runtime_hint_lines || true
+      else
+        echo "👉 请先挂载或启用 /dev/net/tun"
+      fi
       ;;
     tun-device-not-readable)
       echo "👉 请修复 /dev/net/tun 权限，确保当前运行用户可读写"
       ;;
     missing-ip-command)
-      echo "👉 请先安装 iproute2，确保 ip 命令可用"
+      if [ "$(container_env_type 2>/dev/null || echo unknown)" != "host" ]; then
+        tun_container_runtime_hint_lines || true
+      else
+        case "$(install_env_os_variant 2>/dev/null || true)" in
+          openwrt)
+            echo "👉 当前环境缺少 ip 命令；OpenWrt 可安装：opkg update && opkg install ip-full"
+            ;;
+          *)
+            echo "👉 Debian/Ubuntu 可安装：apt update && apt install -y iproute2"
+            echo "👉 其他发行版请安装提供 ip 命令的 iproute / iproute2 软件包"
+            ;;
+        esac
+      fi
       ;;
     runtime-not-running)
       echo "👉 请先启动代理：clashon"
@@ -5592,11 +5673,9 @@ tun_recommendation_lines() {
   if [ "$can_enable" != "true" ]; then
     case "$container_mode" in
       container-risky)
-        echo "1. 当前容器环境已被裁决为高风险：${risk_reason:-容器条件不足}"
-        echo "2. 检查宿主机是否映射 /dev/net/tun"
-        echo "3. 检查是否授予 CAP_NET_ADMIN / --cap-add=NET_ADMIN"
-        echo "4. 检查容器内是否具备 ip 命令"
-        echo "5. 条件满足后再执行：clashctl tun on"
+        echo "👉 当前容器环境已被裁决为高风险：${risk_reason:-容器条件不足}"
+        tun_container_runtime_hint_lines || true
+        echo "👉 条件满足后再执行：clashctl tun on"
         ;;
       *)
         echo "1. 当前环境不满足 Tun 基础条件"
@@ -5622,9 +5701,9 @@ tun_recommendation_lines() {
       return 0
       ;;
     container-risky)
-      echo "1. 当前容器环境属于高风险，不建议直接开启 Tun"
-      echo "2. 先修复：${risk_reason:-容器条件不足}"
-      echo "3. 修复后再执行：clashctl tun on"
+      echo "👉 当前容器环境属于高风险，不建议直接开启 Tun：${risk_reason:-容器条件不足}"
+      tun_container_runtime_hint_lines || true
+      echo "👉 修复后再执行：clashctl tun on"
       return 0
       ;;
   esac
