@@ -7,6 +7,7 @@ PROJECT_DIR="$(cd "$(dirname "$SCRIPT_PATH")/../.." && pwd)"
 source "$PROJECT_DIR/scripts/core/common.sh"
 source "$PROJECT_DIR/scripts/core/runtime.sh"
 source "$PROJECT_DIR/scripts/core/config.sh"
+source "$PROJECT_DIR/scripts/core/completion.sh"
 source "$PROJECT_DIR/scripts/core/proxy.sh"
 source "$PROJECT_DIR/scripts/core/update.sh"
 source "$PROJECT_DIR/scripts/init/systemd.sh"
@@ -42,6 +43,7 @@ Usage:
   status                         🔍️ 查看状态总览
   boot                           🚦 管理开机代理接管
   log/logs                       📜 查看日志
+  completion                     💡 导出 Bash / Zsh 补全脚本
 
 💡 更多高级能力：clashctl help advanced
 EOF
@@ -71,6 +73,7 @@ usage_advanced() {
   boot proxy on|off|status           📜 仅管理开机代理保持
   upgrade                        🚀 升级当前或指定内核
   update                         🔄 更新项目代码
+  completion bash|zsh            💡 导出 Shell 补全脚本
   dev reset                      🧪 恢复到安装前状态（保留项目目录和已下载文件）
 
 📌 Advanced Examples:
@@ -2976,6 +2979,7 @@ cmd_ui_help_summary() {
   printf '  %-18s %s\n' "clashctl sub" "🧩 订阅高级管理（启用 / 禁用 / 重命名 / 删除）"
   printf '  %-18s %s\n' "clashctl upgrade" "🚀 升级当前或指定内核"
   printf '  %-18s %s\n' "clashctl update" "🔄 更新项目代码"
+  printf '  %-18s %s\n' "clashctl completion" "💡 导出 Bash / Zsh 补全脚本"
   echo "📜 日志"
   printf '  %-18s %s\n' "clashctl doctor" "🩺 诊断面板"
   printf '  %-18s %s\n' "clashctl log/logs" "📜 查看日志"
@@ -7275,6 +7279,7 @@ case "$cmd" in
   proxy)          cmd_proxy "$@" ;;
   upgrade)        cmd_upgrade "$@" ;;
   update)         cmd_update "$@" ;;
+  completion)     cmd_completion "$@" ;;
   start-direct)   cmd_start_direct "$@" ;;
   stop-direct)    cmd_stop_direct "$@" ;;
   restart-direct) cmd_restart_direct "$@" ;;
