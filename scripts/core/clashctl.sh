@@ -6962,13 +6962,13 @@ print_select_feedback() {
 
   current="$(proxy_group_current_display "$group" 2>/dev/null || true)"
 
-  ui_title "馃殌 鑺傜偣鍒囨崲瀹屾垚"
+  ui_title "🚀 节点切换完成"
 
   if [ -n "${group:-}" ]; then
-    ui_kv "馃摝" "宸插垏鎹㈢瓥鐣ョ粍" "$group"
+    ui_kv "📦" "已切换策略组" "$group"
   fi
 
-  ui_kv "馃殌" "褰撳墠鑺傜偣" "${current:-<unknown>}"
+  ui_kv "🚀" "当前节点" "${current:-<unknown>}"
 
   main_feedback_runtime_state
   ui_next "clashctl status"
@@ -6986,12 +6986,12 @@ status_current_proxy_brief() {
       return 0
     fi
 
-    echo "鏈惎鍔?"
+    echo "未启动"
     return 0
   fi
 
   if ! proxy_controller_reachable 2>/dev/null; then
-    echo "鎺у埗鍣ㄤ笉鍙闂?"
+    echo "控制器不可访问"
     return 0
   fi
 
@@ -7009,7 +7009,7 @@ status_current_proxy_brief() {
     return 0
   fi
 
-  echo "鏆傛棤鍙垏鎹㈢瓥鐣ョ粍"
+  echo "暂无可切换策略组"
 }
 
 cmd_proxy_groups() {
@@ -7018,25 +7018,25 @@ cmd_proxy_groups() {
   prepare
 
   if ! status_is_running; then
-    die_state "浠ｇ悊鍐呮牳鏈繍琛?" "clashon"
+    die_state "代理内核未运行" "clashon"
   fi
 
   if ! proxy_controller_reachable 2>/dev/null; then
-    die_state "鎺у埗鍣ㄤ笉鍙闂?" "clashctl doctor"
+    die_state "控制器不可访问" "clashctl doctor"
   fi
 
-  ui_title "馃摝 绛栫暐缁勫垪琛?"
-  echo "  馃摝 鍚嶇О                 绫诲瀷         褰撳墠鑺傜偣"
+  ui_title "📦 策略组列表"
+  echo "  📦 名称                 类型         当前节点"
   while IFS= read -r group; do
     [ -n "${group:-}" ] || continue
     found="true"
     type="$(proxy_group_type "$group" 2>/dev/null || echo "unknown")"
     current="$(proxy_group_current_display "$group" 2>/dev/null || true)"
-    printf '  馃摝 %-20s %-12s %s\n' "$group" "$type" "${current:-<unknown>}"
+    printf '  📦 %-20s %-12s %s\n' "$group" "$type" "${current:-<unknown>}"
   done < <(proxy_group_list)
 
   if [ "$found" != "true" ]; then
-    echo "  馃摥 鏆傛棤鍙垏鎹㈢瓥鐣ョ粍"
+    echo "  📭 暂无可切换策略组"
   fi
 
   ui_blank
@@ -7050,33 +7050,33 @@ cmd_proxy_current() {
   prepare
 
   if ! status_is_running; then
-    die_state "浠ｇ悊鍐呮牳鏈繍琛?" "clashon"
+    die_state "代理内核未运行" "clashon"
   fi
 
   if ! proxy_controller_reachable 2>/dev/null; then
-    die_state "鎺у埗鍣ㄤ笉鍙闂?" "clashctl doctor"
+    die_state "控制器不可访问" "clashctl doctor"
   fi
 
   if [ -n "${1:-}" ]; then
     group="$1"
     current="$(proxy_group_current_display "$group" 2>/dev/null || true)"
-    ui_title "馃殌 褰撳墠鑺傜偣"
-    ui_kv "馃摝" "绛栫暐缁?" "$group"
-    ui_kv "馃殌" "褰撳墠鑺傜偣" "${current:-<unknown>}"
+    ui_title "🚀 当前节点"
+    ui_kv "📦" "策略组" "$group"
+    ui_kv "🚀" "当前节点" "${current:-<unknown>}"
     ui_blank
     return 0
   fi
 
-  ui_title "馃殌 褰撳墠鑺傜偣鎬昏"
+  ui_title "🚀 当前节点总览"
   while IFS= read -r group; do
     [ -n "${group:-}" ] || continue
     found="true"
     current="$(proxy_group_current_display "$group" 2>/dev/null || true)"
-    printf '  馃殌 %-20s %s\n' "$group" "${current:-<unknown>}"
+    printf '  🚀 %-20s %s\n' "$group" "${current:-<unknown>}"
   done < <(proxy_group_list)
 
   if [ "$found" != "true" ]; then
-    echo "  馃摥 鏆傛棤鍙垏鎹㈢瓥鐣ョ粍"
+    echo "  📭 暂无可切换策略组"
   fi
 
   ui_blank
@@ -7087,35 +7087,35 @@ cmd_proxy_nodes() {
   local current node found="false"
 
   prepare
-  [ -n "${group:-}" ] || die "璇蜂娇鐢?clashctl select 鍒囨崲鑺傜偣"
+  [ -n "${group:-}" ] || die "请使用 clashctl select 切换节点"
 
   if ! status_is_running; then
-    die_state "浠ｇ悊鍐呮牳鏈繍琛?" "clashon"
+    die_state "代理内核未运行" "clashon"
   fi
 
   if ! proxy_controller_reachable 2>/dev/null; then
-    die_state "鎺у埗鍣ㄤ笉鍙闂?" "clashctl doctor"
+    die_state "控制器不可访问" "clashctl doctor"
   fi
 
   current="$(proxy_group_current_display "$group" 2>/dev/null || true)"
 
-  ui_title "馃殌 鍊欓€夎妭鐐瑰垪琛?"
-  ui_kv "馃摝" "绛栫暐缁?" "$group"
-  ui_kv "馃殌" "褰撳墠鑺傜偣" "${current:-<unknown>}"
+  ui_title "🚀 候选节点列表"
+  ui_kv "📦" "策略组" "$group"
+  ui_kv "🚀" "当前节点" "${current:-<unknown>}"
   ui_blank
 
   while IFS= read -r node; do
     [ -n "${node:-}" ] || continue
     found="true"
     if [ "$node" = "$current" ]; then
-      printf '  * 馃殌 %s\n' "$node"
+      printf '  * 🚀 %s\n' "$node"
     else
-      printf '    馃殌 %s\n' "$node"
+      printf '    🚀 %s\n' "$node"
     fi
   done < <(proxy_group_selectable_nodes "$group")
 
   if [ "$found" != "true" ]; then
-    echo "  馃摥 该策略组暂无可切换真实节点"
+    echo "  📭 该策略组暂无可切换真实节点"
   fi
 
   ui_blank
@@ -7133,7 +7133,7 @@ proxy_pick_group_for_select() {
     groups+=("$group")
   done < <(proxy_group_display_list)
 
-  for group in "鑺傜偣閫夋嫨" "鑷姩閫夋嫨"; do
+  for group in "节点选择" "自动选择"; do
     if printf '%s\n' "${groups[@]}" | grep -Fxq "$group"; then
       ordered_groups+=("$group")
     fi
@@ -7141,7 +7141,7 @@ proxy_pick_group_for_select() {
 
   for group in "${groups[@]}"; do
     case "$group" in
-      鑺傜偣閫夋嫨|鑷姩閫夋嫨)
+      节点选择|自动选择)
         continue
         ;;
     esac
@@ -7151,18 +7151,18 @@ proxy_pick_group_for_select() {
   groups=("${ordered_groups[@]}")
 
   count="${#groups[@]}"
-  [ "$count" -gt 0 ] || die "馃摥 鏆傛棤鍙垏鎹㈢瓥鐣ョ粍"
+  [ "$count" -gt 0 ] || die "📭 暂无可切换策略组"
 
-  echo "馃摝 璇烽€夋嫨绛栫暐缁勶細" >&2
-  echo "馃挕 閫氬父浼樺厛閫夋嫨锛氳妭鐐归€夋嫨" >&2
+  echo "📦 请选择策略组：" >&2
+  echo "💡 通常优先选择：节点选择" >&2
   idx=1
   for group in "${groups[@]}"; do
     current="$(proxy_group_current_display "$group" 2>/dev/null || true)"
     type="$(proxy_group_type_label "$group" 2>/dev/null || echo "unknown")"
-    printf '  %s) 馃摝 %s [%s]  ->  馃殌 %s\n' "$idx" "$group" "$type" "${current:-<unknown>}" >&2
+    printf '  %s) 📦 %s [%s]  ->  🚀 %s\n' "$idx" "$group" "$type" "${current:-<unknown>}" >&2
     idx=$((idx + 1))
   done
-  echo "  q) 閫€鍑?" >&2
+  echo "  q) 退出" >&2
   echo >&2
 
   idx="$(proxy_pick_index "$count")" || return 1
@@ -7178,15 +7178,15 @@ proxy_select_interactive_guarded() {
   prepare
 
   if ! status_is_running; then
-    die_state "浠ｇ悊鍐呮牳鏈繍琛?" "clashon"
+    die_state "代理内核未运行" "clashon"
   fi
 
   if ! proxy_controller_reachable 2>/dev/null; then
-    die_state "鎺у埗鍣ㄤ笉鍙闂?" "clashctl doctor"
+    die_state "控制器不可访问" "clashctl doctor"
   fi
 
   if [ -z "${group:-}" ]; then
-    ui_title "馃殌 鑺傜偣鍒囨崲"
+    ui_title "🚀 节点切换"
     choose_group="true"
   fi
 
@@ -7195,7 +7195,7 @@ proxy_select_interactive_guarded() {
       group="$(proxy_pick_group_for_select)" || return 0
     fi
 
-    proxy_group_exists "$group" || die "绛栫暐缁勪笉瀛樺湪锛?group"
+    proxy_group_exists "$group" || die "策略组不存在：$group"
 
     current="$(proxy_group_current_display "$group" 2>/dev/null || true)"
     nodes=()
@@ -7207,8 +7207,8 @@ proxy_select_interactive_guarded() {
     count="${#nodes[@]}"
     if [ "$count" -le 0 ]; then
       ui_warn "该策略组暂无可切换真实节点"
-      ui_kv "馃摝" "绛栫暐缁?" "$group"
-      ui_kv "馃殌" "褰撳墠鑺傜偣" "${current:-<unknown>}"
+      ui_kv "📦" "策略组" "$group"
+      ui_kv "🚀" "当前节点" "${current:-<unknown>}"
       ui_blank
       if [ "$choose_group" = "true" ]; then
         group=""
@@ -7220,25 +7220,25 @@ proxy_select_interactive_guarded() {
     total_count="$(select_total_node_count 2>/dev/null || true)"
 
     echo
-    echo "馃摝 褰撳墠绛栫暐缁勶細$group"
-    echo "馃殌 褰撳墠鑺傜偣锛?${current:-<unknown>}"
-    echo "馃摝 褰撳墠绛栫暐缁勫€欓€夋暟锛?count"
-    [ -n "${total_count:-}" ] && echo "馃敘 鍏ㄩ儴鑺傜偣鎬绘暟锛?total_count"
-    echo "鈩癸笍 浠ヤ笅浠呮樉绀哄綋鍓嶇瓥鐣ョ粍鍙垏鎹㈣妭鐐?"
+    echo "📦 当前策略组：$group"
+    echo "🚀 当前节点：${current:-<unknown>}"
+    echo "📦 当前策略组候选数：$count"
+    [ -n "${total_count:-}" ] && echo "🔢 全部节点总数：$total_count"
+    echo "ℹ️ 以下仅显示当前策略组可切换节点"
     echo
-    echo "馃殌 璇烽€夋嫨鑺傜偣锛?"
+    echo "🚀 请选择节点："
 
     idx=1
     for node in "${nodes[@]}"; do
       if [ "$node" = "$current" ]; then
-        printf '  %s) 馃殌 %s [褰撳墠]\n' "$idx" "$node"
+        printf '  %s) 🚀 %s [当前]\n' "$idx" "$node"
       else
-        printf '  %s) 馃殌 %s\n' "$idx" "$node"
+        printf '  %s) 🚀 %s\n' "$idx" "$node"
       fi
       idx=$((idx + 1))
     done
 
-    echo "  q) 閫€鍑?"
+    echo "  q) 退出"
     echo
 
     idx="$(proxy_pick_index "$count")" || return 0

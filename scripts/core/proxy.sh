@@ -849,10 +849,10 @@ proxy_group_select() {
   local code response_file response_body
   local available_node found
 
-  [ -n "${group:-}" ] || die "绛栫暐缁勫悕绉颁笉鑳戒负绌?"
-  [ -n "${node:-}" ] || die "鑺傜偣鍚嶇О涓嶈兘涓虹┖"
+  [ -n "${group:-}" ] || die "策略组名称不能为空"
+  [ -n "${node:-}" ] || die "节点名称不能为空"
 
-  proxy_group_exists "$group" || die "绛栫暐缁勪笉瀛樺湪锛?group"
+  proxy_group_exists "$group" || die "策略组不存在：$group"
   proxy_group_can_show_candidates "$group" || die "$(proxy_group_manual_pick_error_message "$group")"
   proxy_node_is_selectable_candidate "$node" || die "节点不是可切换节点：$node"
 
@@ -866,7 +866,7 @@ proxy_group_select() {
   done < <(proxy_group_selectable_nodes "$group")
 
   if [ "$found" != "true" ]; then
-    die "鑺傜偣涓嶅瓨鍦ㄤ簬绛栫暐缁勪腑锛?group -> $node"
+    die "节点不存在于策略组中：$group -> $node"
   fi
 
   base="$(controller_api_base)"
@@ -886,7 +886,7 @@ proxy_group_select() {
     if [ -n "${response_body:-}" ]; then
       die "controller 原始错误：$response_body"
     fi
-    die "鑺傜偣鍒囨崲澶辫触锛歝ontroller 杩斿洖 HTTP $code"
+    die "节点切换失败：controller 返回 HTTP $code"
   fi
 
   rm -f "$response_file" 2>/dev/null || true
